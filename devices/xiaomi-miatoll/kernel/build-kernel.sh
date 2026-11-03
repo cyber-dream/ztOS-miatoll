@@ -1,8 +1,8 @@
 #!/bin/bash
 # The Redmi Note 9 Pro / 9S (miatoll: joyeuse, curtana) kernel: the
 # sm7125-mainline tree postmarketOS ships for these phones, built as
-# postmarketOS builds it (its config, no patches), with ztOS's additions
-# (ztos.config). No postmarketOS tooling: the tarball comes from GitHub.
+# postmarketOS builds it (its config), with ztOS's additions (ztos.config)
+# and one fix, the speaker amplifier's driver (patch-tas2562.py). No postmarketOS tooling: the tarball comes from GitHub.
 #
 #   devices/xiaomi-miatoll/kernel/build-kernel.sh [-j N]
 #
@@ -40,6 +40,8 @@ echo "kernel: unpacking $TAG"
 rm -rf "$SRC"
 mkdir -p "$SRC"
 tar -xzf "$TARBALL" -C "$SRC" --strip-components=1 --touch
+
+python3 "$HERE/patch-tas2562.py" "$SRC"
 
 mkdir -p "$OUT"
 cp "$HERE/config-sm7125.aarch64" "$OUT/.config"
