@@ -1,6 +1,6 @@
 [Unit]
 Description=Redmi Note 9 Pro: bring the sound card up (LPASS pin controller after the ADSP)
-After=pd-mapper.service
+After=pd-mapper.service alsa-restore.service
 Wants=pd-mapper.service
 
 [Service]

@@ -9,6 +9,21 @@ PIN=627c0000.pinctrl
 DRV=/sys/bus/platform/drivers/qcom-sc7280-lpass-lpi-pinctrl
 card() { grep -q Xiaomimiatoll /proc/asound/cards 2>/dev/null; }
 
+# The UCM profile's BootSequence: the speaker amplifier's digital volume and
+# channel (TAS2562 "Digital Volume Control" 109, "ASI1 Sel" LeftRightDiv2).
+# alsa-restore puts back the state saved at the last shutdown and runs the
+# BootSequence only when there is none; a saved state with the amplifier at
+# 0 (-110 dB) leaves the speaker silent for good. Run after alsa-restore,
+# and after udev's own `alsactl restore` for the new card
+# (90-alsa-restore.rules), which can come later than the service.
+boot() {
+	i=0
+	while ! systemctl -q is-active alsa-restore.service && [ "$i" -lt 20 ]; do i=$((i + 1)); sleep 1; done
+	udevadm settle -t 30 || true
+	while pgrep -x alsactl > /dev/null && [ "$i" -lt 40 ]; do i=$((i + 1)); sleep 1; done
+	alsaucm -c hw:0 set _boot "" && echo "UCM BootSequence run"
+}
+
 # the ADSP up (remoteproc "running"), within a minute
 i=0
 until grep -qx running /sys/class/remoteproc/*/state 2>/dev/null && [ -d /sys/bus/platform/devices/$PIN ]; do
@@ -17,10 +32,11 @@ until grep -qx running /sys/class/remoteproc/*/state 2>/dev/null && [ -d /sys/bu
 done
 for try in 1 2 3 4 5; do
 	# a card made on its own in the meantime: nothing to do
-	for w in 1 2 3 4 5; do card && { echo "sound card up (try $try)"; exit 0; }; sleep 1; done
+	for w in 1 2 3 4 5; do card && { echo "sound card up (try $try)"; boot; exit 0; }; sleep 1; done
 	if [ ! -e "$DRV/$PIN" ]; then
 		echo "binding $PIN again (try $try)"
 		echo "$PIN" > "$DRV/bind" 2>/dev/null || true
 	fi
 done
 card || { echo "no sound card after 5 tries" >&2; exit 1; }
+boot
