@@ -1,0 +1,6 @@
+# ztOSCoreSensorFramework, written by ztConflo: kind|id|argument|title
+unit|rmtfs.service||Modem storage
+unit|pd-mapper.service||DSP services
+unit|tqftpserv.service||DSP firmware
+unit|zrnperfd.service||Performance
+session|ztapps||App list

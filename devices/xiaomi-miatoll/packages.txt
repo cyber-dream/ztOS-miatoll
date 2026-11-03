@@ -1,0 +1,7 @@
+# from Arch Linux ARM, on top of the ztOS GSI's packages
+# the modem's and DSPs' QRTR services (Arch Linux ARM's [aur] builds)
+qrtr-git rmtfs-git
+# the GPU's microcode (a630_sqe.fw, a630_gmu.bin): the Adreno 618 uses the A630's
+linux-firmware-qcom
+# the boot stage's EFI loader (systemd's own; kept here to say it is needed)
+systemd

@@ -1,0 +1,4 @@
+# the device's units, linked in by the GSI's vendor generator
+enable rmtfs.service
+enable pd-mapper.service
+enable tqftpserv.service

@@ -1,0 +1,59 @@
+# the device layer's ztOSIAL manifest (first written by ztConflo from postmarketOS's entry)
+
+[device]
+codename = "xiaomi-miatoll"
+name = "Xiaomi Redmi Note 9 Pro / Redmi Note 9S"
+form_factor = "phone"
+scale = 2.5
+
+[gsi]
+min = "0.2.1"
+
+[ial.Device1]
+backend = "generic"
+version = 1
+
+[ial.Power1]
+backend = "generic"
+version = 1
+
+[ial.Perf1]
+backend = "generic"
+version = 1
+
+[ial.Display1]
+backend = "generic"
+version = 1
+curve = "linear"
+
+[ial.Sleep1]
+backend = "generic"
+version = 1
+method = "s2idle"
+
+[ial.Sensors1]
+backend = "generic"
+version = 1
+
+[ial.Haptics1]
+backend = "generic"
+version = 1
+
+[ial.Lights1]
+backend = "generic"
+version = 1
+
+[ial.Modem1]
+backend = "generic"
+version = 1
+
+[android]
+binder = "none"
+gralloc = "gbm"
+
+[units]
+enable = ["rmtfs.service", "pd-mapper.service", "tqftpserv.service"]
+
+[kernel]
+contract_checked = true
+soft_gaps = ["waydroid", "gsi-soft"]
