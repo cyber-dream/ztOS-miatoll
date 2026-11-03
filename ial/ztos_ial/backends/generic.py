@@ -19,15 +19,6 @@ SUPPLY = '/sys/class/power_supply'
 
 # ---- Power1 -----------------------------------------------------------------
 
-# fuel gauges whose current_now is negative while charging
-NEGATIVE_CHARGING = ('qcom_qg',)
-# with no charger driver, at least this much into the battery means plugged in
-# (SM7125 on its default input limit nets only 15..60 mA with the screen on)
-CHARGING_UA = 10000
-# and this much out of it means not: plugged in, it nets no worse than -10 mA
-DISCHARGING_UA = 100000
-
-
 class Power(Backend):
     interface = 'Power1'
     poll_s = 10
@@ -36,9 +27,7 @@ class Power(Backend):
         super().__init__(config, manifest)
         self.battery = config.get('battery') or self._find('Battery')
         self.charger = config.get('charger') or self._find_charger()
-        # make + mean charging; postmarketOS's qcom_qg (SM7125) counts the other way
-        default_sign = -1 if self.battery and os.path.basename(self.battery) in NEGATIVE_CHARGING else 1
-        self.sign = int(config.get('current_sign', default_sign))
+        self.sign = int(config.get('current_sign', 1))    # make + mean charging
 
     @staticmethod
     def _find(kind):
@@ -56,27 +45,6 @@ class Power(Backend):
                 return str(path)
         return None
 
-    # how long a sign of a charger counts: the net current swings around
-    # zero on a weak supply, and Status must not flap with it
-    PLUGGED_HOLD_S = 30
-
-    def _plugged(self):
-        """With no charger driver: a charger is in if the battery takes
-        charge (current into it, or a voltage above the open-circuit one).
-        Not the gauge's current_avg: it is updated rarely and lags a minute
-        behind. Not the UDC's state: on SM7125 the USB-C port has no VBUS
-        detection, and it stays "configured" after unplugging. A clear
-        discharge ends the hold at once."""
-        now = time.monotonic()
-        current = self.sign * read_int(self.node('current_now'))
-        if current < -DISCHARGING_UA:
-            self._plugged_at = -1e9
-            return False
-        ocv = self.node('voltage_ocv')
-        if current > CHARGING_UA or (exists(ocv) and read_int(self.node('voltage_now')) - read_int(ocv) > 20000):
-            self._plugged_at = now
-        return now - getattr(self, '_plugged_at', -1e9) < self.PLUGGED_HOLD_S
-
     def available(self):
         return bool(self.battery)
 
@@ -88,18 +56,12 @@ class Power(Backend):
         b = self.battery
         status = (read(self.node('status'), 'Unknown') or 'Unknown').lower().replace(' ', '-')
         online = read_int(self.node('online', self.charger)) == 1 if self.charger else False
-        current = self.sign * read_int(self.node('current_now')) if b else 0
-        if not online and not self.charger and status == 'unknown' and b:
-            # no charger driver (the PMIC charges by itself, as on SM7125)
-            online = self._plugged()
-            capacity = read_int(self.node('capacity'), -1)
-            status = ('full' if capacity >= 100 else 'charging') if online else 'discharging'
         limit = self.node('input_current_limit', self.charger) if self.charger else ''
         end = self.node('charge_control_end_threshold')
         return {
             'Capacity': read_int(self.node('capacity'), -1) if b else -1,
             'Status': status,
-            'CurrentNow': current,
+            'CurrentNow': self.sign * read_int(self.node('current_now')) if b else 0,
             'VoltageNow': read_int(self.node('voltage_now')) if b else 0,
             'Temperature': read_int(self.node('temp')) / 10.0 if b else 0.0,
             'ChargerOnline': online,

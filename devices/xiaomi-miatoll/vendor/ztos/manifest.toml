@@ -5,6 +5,17 @@ codename = "xiaomi-miatoll"
 name = "Xiaomi Redmi Note 9 Pro / Redmi Note 9S"
 form_factor = "phone"
 scale = 2.5
+# the phone's facts for Settings' processor, graphics, battery and about
+# pages, under the names the Galaxy S9 (Snapdragon) port's Settings reads;
+# ztOS's own Settings does not read them yet, and still shows the S9's
+model = "Xiaomi Redmi Note 9 Pro / 9S (joyeuse / curtana, miatoll)"
+soc = "Snapdragon 720G"
+soc_long = "Qualcomm Snapdragon 720G (SM7125, 8nm)"
+cpu_little = "Kryo 465 Silver"
+cpu_big = "Kryo 465 Gold"
+gpu = "Adreno 618"
+gpu_long = "Qualcomm Adreno 618 (freedreno)"
+battery = "5020 mAh Li-Po"
 
 [gsi]
 min = "0.2.1"
@@ -14,8 +25,13 @@ backend = "generic"
 version = 1
 
 [ial.Power1]
-backend = "generic"
+# the PM6150 charges with no charger driver: miatoll.py tells a charger from
+# the battery's current (see there); its fuel gauge counts charging as negative
+backend = "vendor"
+module = "/vendor/ztos/ial/miatoll.py"
 version = 1
+battery = "/sys/class/power_supply/qcom_qg"
+current_sign = -1
 
 [ial.Perf1]
 backend = "generic"
