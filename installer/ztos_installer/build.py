@@ -164,6 +164,11 @@ rm -f "$R/etc/resolv.conf"; cp -L /etc/resolv.conf "$R/etc/resolv.conf"
 ch() { chroot "$R" /usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/bin HOME=/root LANG=C.UTF-8 "$@"; }
 P="pacman --disable-sandbox --noconfirm"
 
+# a mirror that stalls for ten seconds is not a failed download: under a slow
+# link pacman's low-speed timeout otherwise aborts the whole transaction
+grep -q '^DisableDownloadTimeout' "$R/etc/pacman.conf" ||
+	sed -i 's/^\[options\]/[options]\nDisableDownloadTimeout/' "$R/etc/pacman.conf"
+
 if [ "$TARGET" = starlte ]; then
 	# the kernel is ztOS's own boot image there, never a package
 	sed -i 's/^#\?IgnorePkg *=.*/IgnorePkg   = linux-aarch64 linux-aarch64-headers/' "$R/etc/pacman.conf"
@@ -288,6 +293,13 @@ if [ "$USERNAME" != alarm ] && ch id alarm > /dev/null 2>&1; then
 fi
 if ! ch id "$USERNAME" > /dev/null 2>&1; then
 	ch useradd -m -u 1000 -G wheel,video,audio,input -s /bin/bash "$USERNAME"
+else
+	# the base's own user (alarm) predates /etc/skel's ztOS files, which
+	# useradd copies only when it makes the user: ztMETRO's config, tiles and
+	# the SDK's libraries; without them Settings cannot save anything
+	ch usermod -a -G wheel,video,audio,input "$USERNAME"
+	H=$(ch getent passwd "$USERNAME" | cut -d: -f6)
+	ch sh -c 'cp -an /etc/skel/. "$1"/ && chown -R "$2": "$1"' _ "$H" "$USERNAME"
 fi
 printf '%s:%s\n' "$USERNAME" "$PASSWORD" | ch chpasswd
 ch passwd -l root > /dev/null
