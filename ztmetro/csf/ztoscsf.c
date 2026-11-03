@@ -4,8 +4,9 @@
  * hardware support this system brings itself, starts each with the system,
  * and says so on the screen when one does not start or stops later.
  *
- * The pieces are listed in /etc/ztoscoresensorframework/components, one per
- * line, "kind|id|argument|title":
+ * The pieces are listed in the device layer's /vendor/ztos/csf/components,
+ * or else in /etc/ztoscoresensorframework/components (the Galaxy S9's), one
+ * per line, "kind|id|argument|title":
  *
  *	module|zrn_haptic|zrn-haptic|Vibration motor
  *		a kernel module with no service of its own: loaded here with
@@ -56,6 +57,7 @@
 
 #define NAME		"ztOSCoreSensorFramework"
 #define COMPONENTS	"/etc/ztoscoresensorframework/components"
+#define VENDOR_COMPONENTS	"/vendor/ztos/csf/components"	/* a device layer's, first */
 #define MARKS		"/var/lib/ztoscsf"
 #define RUN_DIR		"/run/ztoscsf"
 #define STATUS		RUN_DIR "/status"
@@ -175,9 +177,12 @@ static void report(struct part *p, const char *fmt, ...)
 
 /* ---- the list ------------------------------------------------------------ */
 
+static const char *components_path;
+
 static void load_parts(void)
 {
-	FILE *f = fopen(COMPONENTS, "r");
+	components_path = access(VENDOR_COMPONENTS, R_OK) == 0 ? VENDOR_COMPONENTS : COMPONENTS;
+	FILE *f = fopen(components_path, "r");
 	char line[256];
 	while (f && fgets(line, sizeof(line), f) && n_parts < MAX_PARTS) {
 		char kind[16] = "", id[64] = "", arg[64] = "", title[48] = "";
@@ -197,7 +202,7 @@ static void load_parts(void)
 		struct part *p = &parts[n_parts];
 		p->kind = !strcmp(kind, "module") ? K_MODULE : !strcmp(kind, "unit") ? K_UNIT : K_SESSION;
 		if (!id[0] || (strcmp(kind, "module") && strcmp(kind, "unit") && strcmp(kind, "session"))) {
-			say("%s: line not understood: %s|%s", COMPONENTS, kind, id);
+			say("%s: line not understood: %s|%s", components_path, kind, id);
 			continue;
 		}
 		snprintf(p->id, sizeof(p->id), "%s", id);
@@ -208,7 +213,15 @@ static void load_parts(void)
 	if (f)
 		fclose(f);
 	else
-		say("%s: %s", COMPONENTS, strerror(errno));
+		say("%s: %s", components_path, strerror(errno));
+}
+
+static bool has_part(const char *id)
+{
+	for (int i = 0; i < n_parts; i++)
+		if (!strcmp(parts[i].id, id))
+			return true;
+	return false;
 }
 
 static void publish(void)
@@ -504,6 +517,9 @@ static void sensorhub_look(void)
 	if (dialog_shown) {
 		return;
 	}
+	/* only a phone whose list has the hub (the Galaxy S9's) has one to watch */
+	if (!has_part("ztoscsf-sensorhub.service") && !has_part("zrn-sensorhub.service"))
+		return;
 
 	/* Wait at least 25 seconds after boot for BCM4773 patch attempt */
 	if (now_s() - started_at < 25) {
