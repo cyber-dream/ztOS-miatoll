@@ -1,0 +1,13 @@
+[Unit]
+Description=Redmi Note 9 Pro: bring the sound card up (LPASS pin controller after the ADSP)
+After=pd-mapper.service
+Wants=pd-mapper.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ztos-miatoll-audio
+RemainAfterExit=yes
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

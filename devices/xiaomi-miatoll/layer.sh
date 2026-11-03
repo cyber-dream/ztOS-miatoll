@@ -84,7 +84,7 @@ touch "$R/usr/lib/clock-epoch"
 # systemd-networkd runs the USB link's DHCP server (10-zboot-usb.network), so
 # the computer gets 172.16.42.2; the serial port over USB has a login
 DEVICE_UNITS="zboot-usb-gadget zboot-firstboot systemd-networkd serial-getty@ttyGS0 sshd
-	rmtfs pd-mapper tqftpserv ModemManager zrnperfd"
+	rmtfs pd-mapper tqftpserv ModemManager zrnperfd ztos-miatoll-audio"
 
 # a developer's SSH key, when the build tree has one (build/ is never
 # committed): into /etc/skel, which the account step copies into the home

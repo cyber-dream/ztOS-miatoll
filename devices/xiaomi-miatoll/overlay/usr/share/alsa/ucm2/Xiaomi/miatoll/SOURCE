@@ -1,0 +1,4 @@
+# From sm7125-mainline/alsa-ucm-conf at 059aa77e6ebc78f10f1d160fd9c4f07d50080912
+# (what postmarketOS's alsa-ucm-conf-qcom-sm7125 2 ships), BSD-3-Clause. The
+# headphone sequences are that fork's codecs/ files, kept here so Arch's own stay as
+# they are.

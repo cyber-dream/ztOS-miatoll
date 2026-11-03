@@ -20,7 +20,7 @@ Tried on a joyeuse with the Huaxing panel.
 
 | Works | Not yet |
 |---|---|
-| boot, display (1080x2400), touch, GPU (Adreno 618, freedreno), Wi-Fi, modem DSP up, battery level, charging (slowly: see below), USB networking, ztOSIAL's checks | sound (no UCM profile yet), calls and mobile data (no ModemManager in the GSI), sensors, fast charging, the clock across reboots |
+| boot, display (1080x2400), touch, GPU (Adreno 618, freedreno), Wi-Fi, speaker (UCM from sm7125-mainline), modem DSP up, battery level, charging (slowly: see below), USB networking, ztOSIAL's checks | headphones and microphones (in the profile, untried), calls and mobile data (no ModemManager in the GSI), sensors, fast charging, the clock across reboots |
 
 Charging is the PMIC's own, at its default input limit: Linux has no driver
 for the PM6150's charger, so ztOSIAL's Power1 tells charging from the
