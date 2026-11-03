@@ -52,20 +52,16 @@ nothing yet.
 | Modem, DSPs | qrtr and rmtfs from Arch Linux ARM's [aur] repository ([`packages.txt`](packages.txt)); pd-mapper v1.1 and tqftpserv v1.3 built from linux-msm's sources in [`layer.sh`](layer.sh) |
 | Sound | The `Xiaomi/miatoll` UCM profile from [sm7125-mainline/alsa-ucm-conf](https://github.com/sm7125-mainline/alsa-ucm-conf) (`059aa77e`, what postmarketOS's `alsa-ucm-conf-qcom-sm7125` 2 ships), with its own headphone sequences beside it so Arch's codec files stay as they are: [`overlay/usr/share/alsa/ucm2`](overlay/usr/share/alsa/ucm2). [`ztos-miatoll-audio`](overlay/usr/local/sbin/ztos-miatoll-audio): the LPASS pin controller can ask the ADSP for its clocks too early at boot, time out and leave the card unmade; it is bound again once the ADSP is up. Then it runs the profile's BootSequence (`alsaucm set _boot`) after alsa-restore and udev's own `alsactl restore`: a saved state with the amplifier's volume at 0 (-110 dB) otherwise comes back at every boot |
 | Speaker amplifier | TAS2562 on I2C 9-004c. Its digital volume is four bytes, and the chip takes the value when the last one (`DVC_CFG4`) is written; the mainline driver writes that one first, so each change applied the previous value's upper bytes (traced: 80 then 109 read back as 80's bytes 1-3). The patch writes it MSB first, drops the register cache (the page select drifted from the chip's, and writes landed on the wrong page) and resets the chip at probe: it is powered from the battery and keeps its registers across a reboot |
-| ztOSIAL | [`vendor/ztos/manifest.toml`](vendor/ztos/manifest.toml): generic backends; [`vendor/ztos/csf/components`](vendor/ztos/csf/components) for ztoscsf (this phone's daemons, no sensor hub) |
+| ztOSIAL | [`vendor/ztos/manifest.toml`](vendor/ztos/manifest.toml): generic backends, but Power1 from [`vendor/ztos/ial/miatoll.py`](vendor/ztos/ial/miatoll.py) (below), and the phone's facts for Settings under the names the S9 (Snapdragon) port uses; [`vendor/ztos/csf/components`](vendor/ztos/csf/components) for ztoscsf (this phone's daemons, no sensor hub) |
 | Root | `LABEL=ZR_ARCH` in [`overlay/etc/fstab`](overlay/etc/fstab); zboot-firstboot grows it to the whole of USERDATA (about 103 GB) on the first boot |
 
 ### What ztOS needed besides this folder
 
-- **ztOSIAL Power1** (`ial/ztos_ial/backends/generic.py`): with no charger
-  driver, charging is the current into the battery. `qcom_qg` counts it
-  negative while charging; the USB-C port's `tcpm-source-psy` is what the
-  phone gives out, not a charger; the gauge's `current_avg` lags a minute
-  and the UDC's state stays "configured" after unplugging, so neither is
-  used. More than 10 mA in, or a voltage over the open-circuit one, is a
-  charger, held for 30 s so the state does not flap on a weak supply; more
-  than 100 mA out ends it at once. Display1 and Haptics1 take `"auto"` as
-  unset.
+- **ztOSIAL**: Display1 and Haptics1 take `"auto"` (what ztConflo
+  writes) as no node given (`ial/ztos_ial/backends/generic.py`). Power1
+  for this phone is a vendor backend, [`vendor/ztos/ial/miatoll.py`](vendor/ztos/ial/miatoll.py):
+  there is no charger driver, and the fuel gauge says only "Unknown" (see
+  there); the manifest's `current_sign = -1` turns `qcom_qg`'s sign round.
 - **ztoscsf** (`ztmetro/csf/ztoscsf.c`) reads a device layer's
   `/vendor/ztos/csf/components` first and looks after a sensor hub only
   where one is listed: no "Core power, Vibration, Notification not
@@ -78,37 +74,45 @@ nothing yet.
   nothing**. pacman's download timeout is off, so a stalling mirror does not
   abort the build.
 
+All of these but the `miatoll` target are also on the `upstream-fixes`
+branch, from ztOS's `main` alone, for ztOS itself.
+
+### On ztOS's Supported Devices site
+
+[`port-entry.json`](port-entry.json) is this phone's entry as the site's "Add
+your port" form sends it; [`scripts/port-entry.py`](scripts/port-entry.py)
+makes it, with INSTALL.md as the guide. The form also wants a photo of the
+phone running ztOS, and the maintainer's name and contact.
+
 ## Installing
 
+Step by step, for someone starting from Android: **[INSTALL.md](INSTALL.md)**
+(the same text is the guide on ztOS's Supported Devices site). In short:
+
+```
+devices/xiaomi-miatoll/kernel/build-kernel.sh
+installer/ztos build --target miatoll --user alarm --password alarm --hostname ztos-miatoll
+# the phone in fastboot: power off, hold Volume Down + Power
+devices/xiaomi-miatoll/scripts/flash.sh
+# once ztOS runs: the phone's own partitions to backups/miatoll/
+devices/xiaomi-miatoll/scripts/backup.sh alarm@172.16.42.1
+```
+
 > **A full flash erases the phone**: everything in USERDATA. Only CACHE,
-> USERDATA, DTBO and BOOT are written; the modem's own partitions (EFS:
-> IMEI, calibration) are never touched.
+> USERDATA, DTBO and BOOT are written; the modem's own partitions (IMEI,
+> calibration) are never touched.
 
-1. **Unlock the bootloader** with Xiaomi's Mi Unlock tool (MIUI: Settings >
-   About phone, tap MIUI version seven times; Developer options > Mi Unlock
-   status, bind the account; wait out Xiaomi's waiting period).
-2. **Charge the phone.** At a low charge the bootloader refuses some
-   commands halfway through (`erase dtbo` failed at 12 %); `flash.sh` checks
-   `battery-soc-ok` first.
-3. On the computer (Linux): clang, lld, llvm, bc, ccache, flex, bison,
-   pahole, dosfstools, mtools, cpio, android-tools (fastboot, img2simg) and
-   qemu-user-static (to check the boot stage's busybox).
-4. Build and flash:
-
-   ```
-   devices/xiaomi-miatoll/kernel/build-kernel.sh
-   installer/ztos build --target miatoll --user alarm --password alarm --hostname ztos-miatoll
-   # the phone in fastboot: power off, hold Volume Down + Power
-   devices/xiaomi-miatoll/scripts/flash.sh
-   ```
-
-   `installer/ztos build` runs in a user namespace, no sudo, about 35
-   minutes (ARM programs run emulated on an x86 computer). `flash.sh` checks
-   that the phone is a miatoll and charged, asks for the word `erase`, then
-   writes CACHE, USERDATA (sparse), erases DTBO and writes U-Boot to BOOT
-   last.
-5. The first boot grows the root and sets up pacman's keyring, then shows
-   the lock screen. Log in over USB: `ssh alarm@172.16.42.1`.
+- `installer/ztos build` runs in a user namespace, no sudo, about 35
+  minutes (ARM programs run emulated on an x86 computer).
+- `flash.sh` checks that the phone is a miatoll and that its bootloader
+  thinks the battery charged enough (`erase dtbo` failed at 12 %), asks for
+  the word `erase`, then writes CACHE, USERDATA (sparse), erases DTBO and
+  writes U-Boot to BOOT last.
+- [`backup.sh`](scripts/backup.sh) reads persist, modemst1, modemst2, fsg,
+  fsc and devinfo over SSH (Xiaomi's fastboot cannot read partitions),
+  twice each, and keeps them only if both reads agree.
+- The first boot grows the root and sets up pacman's keyring, then shows
+  the lock screen. Log in over USB: `ssh alarm@172.16.42.1`.
 
 ### Updating
 

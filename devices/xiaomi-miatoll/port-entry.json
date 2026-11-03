@@ -1,0 +1,258 @@
+{
+ "name": "Xiaomi Redmi Note 9 Pro / 9S",
+ "maker": "Xiaomi",
+ "model": "M2003J6B2G (9 Pro), M2003J6A1G (9S)",
+ "codename": "miatoll",
+ "maintainer": "",
+ "contact": "",
+ "summary": "ztOS on the Redmi Note 9 Pro (joyeuse) and Redmi Note 9S (curtana), Snapdragon 720G, without postmarketOS. Mainline Linux 6.14.7 from sm7125-mainline, with a fix for the speaker amplifier's volume and Landlock for pacman. Xiaomi's bootloader starts U-Boot from BOOT, then systemd-boot on CACHE, the kernel and ztOS's boot stage; the system lives in USERDATA. Display, touch, the Adreno GPU, Wi-Fi, the speaker and charging (at 1.4 A) work; the modem DSP runs, but calls, SMS, data and the sensors are not set up yet. Built on Linux in a user namespace, no root needed.",
+ "specs": [
+  [
+   "SoC",
+   "Qualcomm Snapdragon 720G (SM7125)"
+  ],
+  [
+   "CPU",
+   "2× Kryo 465 Gold at 2.3 GHz, 6× Kryo 465 Silver at 1.8 GHz"
+  ],
+  [
+   "GPU",
+   "Adreno 618 (freedreno, OpenGL ES 3.2)"
+  ],
+  [
+   "RAM",
+   "4, 6 or 8 GB"
+  ],
+  [
+   "Storage",
+   "64 or 128 GB UFS 2.1, microSD"
+  ],
+  [
+   "Display",
+   "6.67 in, 1080×2400 IPS LCD"
+  ],
+  [
+   "Battery",
+   "5020 mAh"
+  ],
+  [
+   "Kernel",
+   "Mainline Linux 6.14.7 (sm7125-mainline)"
+  ],
+  [
+   "Released",
+   "2020"
+  ],
+  [
+   "Device layer",
+   "devices/xiaomi-miatoll in github.com/cyber-dream/ztOS-miatoll"
+  ]
+ ],
+ "install": {
+  "markdown": "## Installing ztOS on the Redmi Note 9 Pro / 9S (miatoll)\n\n> **This erases the phone.** Everything in USERDATA (Android's apps, data and\n> files) is replaced. ztOS writes four partitions only: CACHE (its boot\n> partition), USERDATA (the system), DTBO (erased) and BOOT (U-Boot). The\n> phone's identity (IMEI, the modem's calibration, the Wi-Fi and Bluetooth\n> addresses, the sensors' calibration) is never written, and step 7 saves\n> it to your computer anyway.\n\nWorks on the **Redmi Note 9 Pro** (global, `joyeuse`) and the **Redmi Note\n9S** (`curtana`). Tried on a joyeuse with a Huaxing panel; the 9S and the\nTianma panel use the same kernel and device trees, but nobody has tried them\nyet. The Redmi Note 9 Pro **5G** and the Chinese Note 9 Pro are other phones.\n\n### What you need\n\n- A Linux computer with 30 GB free and an internet connection (the build\n  needs user namespaces; it does not run on Windows or macOS)\n- A USB-C data cable (some only charge)\n- The phone charged above 50 %\n- About 1½ hours the first time, mostly the build; plus Xiaomi's waiting\n  period for unlocking (step 2), which can be a week\n\n### 1. Install the tools on your computer\n\nOn Arch Linux:\n\n```sh\nsudo pacman -S --needed git python clang lld llvm bc ccache flex bison pahole \\\n  dtc dosfstools mtools cpio e2fsprogs libarchive util-linux android-tools \\\n  qemu-user-static qemu-user-static-binfmt\n```\n\nThe build runs as you, not as root, in a user namespace, so your user needs\na range of sub-UIDs. Check that this prints a line:\n\n```sh\ngrep \"^$USER:\" /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 \"$USER\"\n```\n\nOn other distributions the names differ a little: clang, lld, llvm, bc,\nflex, bison, pahole (dwarves), dtc (device-tree-compiler), dosfstools,\nmtools, cpio, e2fsprogs, bsdtar (libarchive), fastboot and img2simg\n(android-tools or android-sdk-libsparse-utils), and qemu-user-static with\nbinfmt.\n\n### 2. Unlock the bootloader\n\n1. Back up the phone. Unlocking erases it.\n2. In MIUI: Settings > About phone, tap **MIUI version** seven times.\n3. Settings > Additional settings > Developer options > **Mi Unlock status**:\n   bind your Mi account (with a SIM in and mobile data on).\n4. Turn the phone off, hold **Volume Down + Power**: the fastboot screen.\n5. Run Xiaomi's **Mi Unlock** tool (Windows), sign in with the same account\n   and unlock. It usually says to wait a number of hours or days first;\n   wait them out and run it again. Unlocking erases the phone.\n\n### 3. Get ztOS\n\n```sh\ngit clone https://github.com/cyber-dream/ztOS-miatoll.git\ncd ztOS-miatoll\n```\n\n### 4. Say which phone and panel\n\nThe kernel's device tree depends on the phone and on who made its panel:\n`joyeuse-huaxing` (the default), `joyeuse-tianma`, `curtana-huaxing` or\n`curtana-tianma`. With the phone in fastboot,\n\n```sh\nfastboot getvar product\n```\n\nsays `joyeuse` or `curtana`. There is no simple way to read the panel's\nmaker from fastboot: start with Huaxing, the more common one. If the screen\nstays black after step 8 while the phone answers over USB, it is the other\npanel; change the word, run `devices/xiaomi-miatoll/boot/build-boot.sh`\nand `devices/xiaomi-miatoll/scripts/flash.sh --boot-only`, which writes the\nboot partition only.\n\n```sh\nmkdir -p build\necho joyeuse-huaxing > build/miatoll-variant\n```\n\n### 5. Build the kernel\n\n```sh\ndevices/xiaomi-miatoll/kernel/build-kernel.sh\n```\n\nIt downloads sm7125-mainline's Linux 6.14.7 and builds it with clang: 20\nto 60 minutes the first time, depending on the computer, and much less the\nnext time (ccache).\n\n### 6. Build the system\n\nChoose the user name and password you will log in with (the password is\nalso for `sudo`):\n\n```sh\npython3 installer/ztos build --target miatoll --user YOURNAME --password YOURPASSWORD --hostname ztos-miatoll\n```\n\nAbout 35 minutes: the phone's programs run emulated on the computer while\nthe system is put together. The result is `build/ztos/miatoll/root.img` and\nthe boot partition `build/ztos/miatoll/stage/boot/ztos-miatoll-bootpart.img`.\n\n### 7. Install it\n\n1. Turn the phone off and hold **Volume Down + Power** until the fastboot\n   screen. Plug it in.\n2. Run:\n\n   ```sh\n   devices/xiaomi-miatoll/scripts/flash.sh\n   ```\n\n   It checks that the phone is a miatoll and charged enough for its\n   bootloader, then asks you to type `erase`. It writes the boot partition\n   to CACHE, the system to USERDATA, erases DTBO and writes U-Boot to BOOT,\n   then restarts the phone. Writing the system takes a few minutes.\n\n### 8. Start ztOS\n\nThe first start takes about a minute: the system grows to fill USERDATA and\nsets up pacman's keys. Then the lock screen; log in with your user and\npassword, and the Welcome app shows how ztOS is used.\n\nOver the USB cable the phone is also a network: `ssh YOURNAME@172.16.42.1`\n(the computer gets an address by DHCP).\n\nThen save the phone's own partitions to the computer, once:\n\n```sh\ndevices/xiaomi-miatoll/scripts/backup.sh YOURNAME@172.16.42.1\n```\n\nIt asks the phone's password (for `sudo` on it), reads persist, the modem's\npartitions (modemst1, modemst2, fsg, fsc) and devinfo twice each, compares\nthe two reads and keeps them in `backups/miatoll/`. ztOS never writes them;\nkeep a copy somewhere safe all the same.\n\n### Upgrading to a new version, keeping your data\n\nA new system version replaces USERDATA. `upgrade.sh` keeps your data across\nit: your home (settings, files), Wi-Fi networks, Bluetooth pairings,\nmessages and your password. Build the new version as in steps 5 and 6, with\nthe same user name, then:\n\n1. With the old ztOS running and the cable in:\n\n   ```sh\n   devices/xiaomi-miatoll/scripts/upgrade.sh save\n   ```\n\n2. Step 7.\n3. When the new ztOS shows its lock screen:\n\n   ```sh\n   devices/xiaomi-miatoll/scripts/upgrade.sh restore backups/miatoll/ztos-data-DATE.tar.gz\n   ```\n\nThe saved file holds Wi-Fi passwords and messages: it stays in `backups/`,\nout of git.\n\nA new kernel alone (step 5 again) keeps everything: copy its modules to the\nphone (`build/linux-sm7125-6.14.7-r2/out/modroot/usr/lib/modules/*` to\n`/usr/lib/modules/`, then `sudo depmod -a`), run\n`devices/xiaomi-miatoll/boot/build-boot.sh`, and write the boot partition\nalone with `devices/xiaomi-miatoll/scripts/flash.sh --boot-only`.\n\n### If something goes wrong\n\n| What you see | What to do |\n|---|---|\n| `no phone in fastboot` | Power off, hold Volume Down + Power; try another cable or USB port; `fastboot devices` should list it |\n| `the battery is too low for the bootloader` | Charge it switched off for half an hour, then step 7 again |\n| `this computer is missing what building ztOS needs` | Install what it lists (step 1) |\n| `a /etc/subuid range for ...` | The `usermod --add-subuids` line in step 1 |\n| `no kernel: run devices/xiaomi-miatoll/kernel/build-kernel.sh first` | Step 5, then step 6 again |\n| A black screen, but `ssh` over USB works | The other panel: step 4 |\n| ztOS's rescue screen: the system was not found | Step 7 again |\n| `pacman` is slow or times out | Put `Server = http://de.mirror.archlinuxarm.org/$arch/$repo` first in `/etc/pacman.d/mirrorlist` on the phone |\n\n### Back to Android\n\nDownload Xiaomi's **fastboot ROM** (not the recovery ROM) for your model and\nregion, and flash it from fastboot with its own `flash_all.sh`. It writes\nevery partition ztOS used, BOOT and DTBO included. Keep the bootloader\nunlocked until Android has started once."
+ },
+ "features": [
+  {
+   "category": "Boot",
+   "feature": "Booting from internal storage",
+   "status": "working",
+   "notes": "Xiaomi's bootloader, U-Boot, systemd-boot, the kernel, ztOS's boot stage; the root is found in under 2 s"
+  },
+  {
+   "category": "Display",
+   "feature": "Panel, 1080x2400",
+   "status": "working",
+   "notes": "Huaxing FT8756 (MSM DPU); the Tianma panel is built in but not tried"
+  },
+  {
+   "category": "Display",
+   "feature": "Brightness",
+   "status": "working",
+   "notes": "ztOSIAL Display1"
+  },
+  {
+   "category": "Display",
+   "feature": "GPU",
+   "status": "working",
+   "notes": "Adreno 618 through freedreno"
+  },
+  {
+   "category": "Input",
+   "feature": "Touchscreen",
+   "status": "working",
+   "notes": "FT8756 over SPI, multi-touch"
+  },
+  {
+   "category": "Input",
+   "feature": "Power and volume keys",
+   "status": "working",
+   "notes": ""
+  },
+  {
+   "category": "Input",
+   "feature": "Vibration",
+   "status": "untested",
+   "notes": ""
+  },
+  {
+   "category": "Power",
+   "feature": "CPU, frequency scaling",
+   "status": "untested",
+   "notes": ""
+  },
+  {
+   "category": "Power",
+   "feature": "Battery and charging",
+   "status": "partial",
+   "notes": "Level from the PM6150's fuel gauge; charging at 5 V and 1.4 A (0.4-0.5 A into the battery with the screen on): the PMIC charges by itself, there is no charger driver yet. No fast charging"
+  },
+  {
+   "category": "Power",
+   "feature": "Sleep (suspend)",
+   "status": "untested",
+   "notes": ""
+  },
+  {
+   "category": "Power",
+   "feature": "Clock across reboots",
+   "status": "partial",
+   "notes": "Not kept by the PMIC's RTC; never earlier than the build's date, NTP sets it once online"
+  },
+  {
+   "category": "Network",
+   "feature": "Wi-Fi",
+   "status": "working",
+   "notes": "WCN3991 (ath10k), through the modem DSP"
+  },
+  {
+   "category": "Network",
+   "feature": "Bluetooth",
+   "status": "untested",
+   "notes": ""
+  },
+  {
+   "category": "Network",
+   "feature": "Mobile data",
+   "status": "broken",
+   "notes": "Not set up yet: ModemManager over QRTR"
+  },
+  {
+   "category": "Network",
+   "feature": "USB networking",
+   "status": "working",
+   "notes": "NCM: 172.16.42.1 (the computer gets 172.16.42.2), plus a serial console"
+  },
+  {
+   "category": "Modem",
+   "feature": "SIM and signal",
+   "status": "broken",
+   "notes": "The modem DSP and its QRTR services run; ModemManager is not set up yet"
+  },
+  {
+   "category": "Modem",
+   "feature": "SMS",
+   "status": "broken",
+   "notes": "Not set up yet"
+  },
+  {
+   "category": "Modem",
+   "feature": "Calls",
+   "status": "broken",
+   "notes": "Not set up yet"
+  },
+  {
+   "category": "Audio",
+   "feature": "Speaker",
+   "status": "working",
+   "notes": "TAS2562; media and system sounds through PipeWire. Needs a kernel fix: mainline's driver writes the amplifier's volume in the wrong order"
+  },
+  {
+   "category": "Audio",
+   "feature": "Microphone",
+   "status": "untested",
+   "notes": "In the sound profile (WCD9375), not tried"
+  },
+  {
+   "category": "Audio",
+   "feature": "Headphones",
+   "status": "untested",
+   "notes": "In the sound profile, not tried"
+  },
+  {
+   "category": "Sensors",
+   "feature": "Ambient light",
+   "status": "broken",
+   "notes": "On the ADSP's sensor domain: not set up yet"
+  },
+  {
+   "category": "Sensors",
+   "feature": "Accelerometer, gyroscope",
+   "status": "broken",
+   "notes": "On the ADSP's sensor domain: not set up yet"
+  },
+  {
+   "category": "Sensors",
+   "feature": "Proximity",
+   "status": "broken",
+   "notes": "On the ADSP's sensor domain: not set up yet"
+  },
+  {
+   "category": "Camera",
+   "feature": "Cameras",
+   "status": "broken",
+   "notes": "No picture yet. The front (OV16A1Q) and macro (S5K5E9) sensors are detected and give raw frames, which need libcamera; the main 64 MP, ultra-wide and depth cameras have no drivers"
+  },
+  {
+   "category": "Location",
+   "feature": "GPS",
+   "status": "untested",
+   "notes": ""
+  },
+  {
+   "category": "Software",
+   "feature": "ztMETRO",
+   "status": "working",
+   "notes": ""
+  },
+  {
+   "category": "Software",
+   "feature": "Android apps (Waydroid)",
+   "status": "broken",
+   "notes": "No binderfs in the kernel yet"
+  },
+  {
+   "category": "Software",
+   "feature": "ztOSIAL (ztos-ial test)",
+   "status": "working",
+   "notes": "`ztos-ial check`: ok; Power1 from a vendor backend (charging told from the battery's current)"
+  },
+  {
+   "category": "Other",
+   "feature": "Fingerprint, IR, NFC",
+   "status": "broken",
+   "notes": "Not started"
+  }
+ ],
+ "notes": [
+  {
+   "title": "Charging is slow, and only up to 1.4 A.",
+   "text": "Linux has no driver for the PM6150's charger yet; the PMIC charges on its own at the input limit the bootloader sets. A long charge takes a few hours; a 9 V fast charger charges at 5 V."
+  },
+  {
+   "title": "Settings shows the Galaxy S9's processor and graphics.",
+   "text": "Its processor, graphics and About pages are written for the S9 (Exynos 9810, Mali-G72). The phone's own facts are in its ztOSIAL manifest, for when Settings reads them."
+  },
+  {
+   "title": "The clock is wrong after a restart without internet.",
+   "text": "The PMIC's clock is not kept; it starts at the build's date until NTP sets it."
+  },
+  {
+   "title": "No sound, while the volume panel says Headphones.",
+   "text": "The volume panel's output switch also offers the headphones when none are plugged in, and the choice is kept per app. Switch back to Speaker there."
+  },
+  {
+   "title": "A wrong battery level for a minute after a restart.",
+   "text": "The fuel gauge needs a minute to settle; it corrects itself."
+  }
+ ]
+}
