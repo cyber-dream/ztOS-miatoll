@@ -1,39 +1,164 @@
 # ztOS on the Redmi Note 9 Pro / 9S (miatoll)
 
 The SM7125 (Snapdragon 720G) Xiaomi phones: **joyeuse** (Redmi Note 9 Pro,
-Global) and **curtana** (Redmi Note 9S). Built without postmarketOS: the
-layout follows the Galaxy S9 (Snapdragon) port (Davitekk/ztOS,
-`devices/samsung-starqltechn`).
+Global) and **curtana** (Redmi Note 9S). ztOS is built here **without
+postmarketOS**: the kernel, the boot stage, the firmware and the device
+layer come from this folder, and the system from `installer/ztos build
+--target miatoll`. The layout follows the Galaxy S9 (Snapdragon) port
+(Davitekk/ztOS, `devices/samsung-starqltechn`).
 
-Tried on a joyeuse with the Huaxing panel.
-
-| | |
-|---|---|
-| Kernel | [sm7125-mainline](https://github.com/sm7125-mainline/linux) `sm7125-6.14.7-r2`, the tree and config postmarketOS ships, plus [`kernel/ztos.config`](kernel/ztos.config): [`kernel/build-kernel.sh`](kernel/build-kernel.sh) (clang, no root) |
-| Boot | the Xiaomi bootloader starts U-Boot ([sm7125-mainline's release](https://github.com/sm7125-mainline/u-boot/releases)) from BOOT; U-Boot starts systemd-boot from CACHE (FAT32, `pmOS_boot`), which starts the kernel and zboot: [`boot/build-boot.sh`](boot/build-boot.sh). DTBO is erased; U-Boot gives the device tree |
-| Boot stage | zboot ([`initramfs/init`](initramfs/init)): finds the `ZR_ARCH` root in USERDATA; if it cannot, a rescue shell on USB (telnet on 172.16.42.1), its log saved to CACHE |
-| Firmware | [sm7125-mainline/firmware-xiaomi-miatoll](https://github.com/sm7125-mainline/firmware-xiaomi-miatoll) at postmarketOS's commit ([`firmware/fetch.sh`](firmware/fetch.sh)); the GPU's from linux-firmware-qcom |
-| Modem, DSPs | qrtr and rmtfs (Arch Linux ARM), pd-mapper and tqftpserv built in [`layer.sh`](layer.sh) |
-| ztOSIAL | [`vendor/ztos/manifest.toml`](vendor/ztos/manifest.toml): generic backends |
+Tried on a joyeuse (Huaxing panel), ztOS BETA-1.1 (0.2.1).
 
 ## Status
 
-| Works | Not yet |
+**Works**: tried, and does what it should. **Partial**: some of it works;
+the notes say what. **Untested**: in place, not yet tried. **Not started**:
+nothing yet.
+
+| Category | Feature | Status | Notes |
+|---|---|---|---|
+| Boot | Booting from internal storage (UFS) | Works | Xiaomi's bootloader, U-Boot, systemd-boot, the kernel, zboot; the root is found in 1.7 s |
+| Boot | Rescue shell | Untested | zboot's, on USB (telnet 172.16.42.1), when no root is found or with `zboot.rescue=1` |
+| Display | Panel, 1080x2400 | Works | Huaxing FT8756 (Tianma NT36675 built in too, untried), MSM DPU |
+| Display | Brightness | Works | ztOSIAL Display1, linear curve |
+| Input | Touchscreen | Works | FT8756 over SPI; its firmware in the boot stage. The kernel logs an occasional CRC error on a read |
+| Input | Power and volume keys | Works | |
+| 3D | GPU | Works | Adreno 618 through freedreno (Mesa reports FD618), OpenGL ES 3.2 |
+| Power | Battery level | Works | PM6150 QGauge (`qcom_qg`); for a minute after a reboot it can show a wrong level |
+| Power | Charging | Partial | The PMIC charges at its default input limit (about 500 mA): Linux has no driver for the PM6150's charger. ztOSIAL's Power1 tells charging from the current into the battery (see below). 50-100 mA net with the screen on |
+| Power | Fast charging | Not started | Needs an SMB5 charger driver (and USB PD as a sink for 9 V) |
+| Power | Clock across reboots | Partial | Not kept by the PMIC's RTC; `/usr/lib/clock-epoch` keeps it at least at the build's date, NTP sets it once online |
+| Network | Wi-Fi | Works | WCN3991 (ath10k_snoc), `wld0`, through the modem DSP |
+| Network | USB networking to a computer | Works | NCM: 172.16.42.1, the computer gets 172.16.42.2; a serial console (ttyGS0) too |
+| Network | Bluetooth | Untested | |
+| Modem | DSP, QRTR services | Works | qrtr, rmtfs, pd-mapper, tqftpserv; the modem, ADSP and CDSP run |
+| Modem | SIM, calls, SMS, mobile data | Not started | No ModemManager in the GSI yet |
+| Audio | Speaker | Works | TAS2562, sm7125-mainline's UCM profile; PipeWire's default output |
+| Audio | Headphones, microphones | Untested | In the profile (WCD9375): headphones, bottom and top mics |
+| Sensors | Accelerometer, light, proximity | Not started | On the ADSP's sensor domain (hexagonrpcd, libssc) |
+| Camera | Cameras | Not started | |
+| Other | Fingerprint, IR, NFC | Not started | |
+
+## How it is made
+
+| | |
 |---|---|
-| boot, display (1080x2400), touch, GPU (Adreno 618, freedreno), Wi-Fi, speaker (UCM from sm7125-mainline), modem DSP up, battery level, charging (slowly: see below), USB networking, ztOSIAL's checks | headphones and microphones (in the profile, untried), calls and mobile data (no ModemManager in the GSI), sensors, fast charging, the clock across reboots |
+| Kernel | [sm7125-mainline](https://github.com/sm7125-mainline/linux) `sm7125-6.14.7-r2`, the tarball and config postmarketOS's `linux-postmarketos-qcom-sm7125` 6.14.7 builds (no patches there either), plus [`kernel/ztos.config`](kernel/ztos.config): [`kernel/build-kernel.sh`](kernel/build-kernel.sh). Cross-compiled with clang (`LLVM=1`), no root, about 25 minutes the first time and minutes after (ccache). The config is postmarketOS's but for `LOCALVERSION` (`6.14.7-ztos-sm7125`); its 771 modules are the same |
+| Boot chain | The Xiaomi bootloader starts U-Boot ([sm7125-mainline's 2025-06-02 release](https://github.com/sm7125-mainline/u-boot/releases)) from BOOT, with DTBO erased; U-Boot gives the device tree and starts systemd-boot (the root's own `systemd-bootaa64.efi`) from CACHE, a 272 MiB FAT32 labelled `pmOS_boot` (UFS's 4 KiB sectors need that size for FAT32), which starts the kernel (an EFI zboot image) and zboot: [`boot/build-boot.sh`](boot/build-boot.sh), no root (mtools) |
+| Boot stage | zboot ([`initramfs/init`](initramfs/init)), the S9 (Snapdragon) port's with this phone's names, on Arch Linux ARM's static busybox: finds the root labelled `ZR_ARCH` (or `pmOS_root`, a ztConflo image's) in USERDATA, mounts it read-only and hands over; UFS, the panels and the USB gadget are built into the kernel, so it loads nothing. It carries the touchscreens' firmware, which their built-in drivers ask for before the root is mounted |
+| Firmware | [sm7125-mainline/firmware-xiaomi-miatoll](https://github.com/sm7125-mainline/firmware-xiaomi-miatoll) at the commit postmarketOS's `firmware-xiaomi-miatoll` 5 ships, the same 15 files ([`firmware/fetch.sh`](firmware/fetch.sh), checked by sha512); the GPU's microcode from Arch's `linux-firmware-qcom`; Wi-Fi's board file from Arch's `linux-firmware` |
+| Modem, DSPs | qrtr and rmtfs from Arch Linux ARM's [aur] repository ([`packages.txt`](packages.txt)); pd-mapper v1.1 and tqftpserv v1.3 built from linux-msm's sources in [`layer.sh`](layer.sh) |
+| Sound | The `Xiaomi/miatoll` UCM profile from [sm7125-mainline/alsa-ucm-conf](https://github.com/sm7125-mainline/alsa-ucm-conf) (`059aa77e`, what postmarketOS's `alsa-ucm-conf-qcom-sm7125` 2 ships), with its own headphone sequences beside it so Arch's codec files stay as they are: [`overlay/usr/share/alsa/ucm2`](overlay/usr/share/alsa/ucm2). [`ztos-miatoll-audio`](overlay/usr/local/sbin/ztos-miatoll-audio): the LPASS pin controller can ask the ADSP for its clocks too early at boot, time out and leave the card unmade; it is bound again once the ADSP is up |
+| ztOSIAL | [`vendor/ztos/manifest.toml`](vendor/ztos/manifest.toml): generic backends; [`vendor/ztos/csf/components`](vendor/ztos/csf/components) for ztoscsf (this phone's daemons, no sensor hub) |
+| Root | `LABEL=ZR_ARCH` in [`overlay/etc/fstab`](overlay/etc/fstab); zboot-firstboot grows it to the whole of USERDATA (about 103 GB) on the first boot |
 
-Charging is the PMIC's own, at its default input limit: Linux has no driver
-for the PM6150's charger, so ztOSIAL's Power1 tells charging from the
-battery's current.
+### What ztOS needed besides this folder
 
-## Building and flashing
+- **ztOSIAL Power1** (`ial/ztos_ial/backends/generic.py`): with no charger
+  driver, charging is the current into the battery. `qcom_qg` counts it
+  negative while charging; the USB-C port's `tcpm-source-psy` is what the
+  phone gives out, not a charger; the gauge's `current_avg` lags a minute
+  and the UDC's state stays "configured" after unplugging, so neither is
+  used. More than 10 mA in, or a voltage over the open-circuit one, is a
+  charger, held for 30 s so the state does not flap on a weak supply; more
+  than 100 mA out ends it at once. Display1 and Haptics1 take `"auto"` as
+  unset.
+- **ztoscsf** (`ztmetro/csf/ztoscsf.c`) reads a device layer's
+  `/vendor/ztos/csf/components` first and looks after a sensor hub only
+  where one is listed: no "Core power, Vibration, Notification not
+  available" or "Sensor hub stopped" on a phone without the S9's hub.
+- **ztMETRO** (`ztmetro/ztmetro.c`) asks Power1's `ChargerOnline` when sysfs
+  shows no charger.
+- **The installer** (`installer/ztos_installer`): the `miatoll` target; and
+  a user the base already has (`alarm`) now gets `/etc/skel` copied into its
+  home. It did not, so `~/.config/ztmetro` was missing and **Settings saved
+  nothing**. pacman's download timeout is off, so a stalling mirror does not
+  abort the build.
 
-```
-devices/xiaomi-miatoll/kernel/build-kernel.sh
-installer/ztos build --target miatoll --user alarm
-devices/xiaomi-miatoll/scripts/flash.sh          # erases the phone
-devices/xiaomi-miatoll/scripts/flash.sh --boot-only   # a new kernel or boot stage alone
-```
+## Installing
 
-`scripts/upgrade.sh save` before a full flash and `restore` after the first
-boot keep the user's data.
+> **A full flash erases the phone**: everything in USERDATA. Only CACHE,
+> USERDATA, DTBO and BOOT are written; the modem's own partitions (EFS:
+> IMEI, calibration) are never touched.
+
+1. **Unlock the bootloader** with Xiaomi's Mi Unlock tool (MIUI: Settings >
+   About phone, tap MIUI version seven times; Developer options > Mi Unlock
+   status, bind the account; wait out Xiaomi's waiting period).
+2. **Charge the phone.** At a low charge the bootloader refuses some
+   commands halfway through (`erase dtbo` failed at 12 %); `flash.sh` checks
+   `battery-soc-ok` first.
+3. On the computer (Linux): clang, lld, llvm, bc, ccache, flex, bison,
+   pahole, dosfstools, mtools, cpio, android-tools (fastboot, img2simg) and
+   qemu-user-static (to check the boot stage's busybox).
+4. Build and flash:
+
+   ```
+   devices/xiaomi-miatoll/kernel/build-kernel.sh
+   installer/ztos build --target miatoll --user alarm --password alarm --hostname ztos-miatoll
+   # the phone in fastboot: power off, hold Volume Down + Power
+   devices/xiaomi-miatoll/scripts/flash.sh
+   ```
+
+   `installer/ztos build` runs in a user namespace, no sudo, about 35
+   minutes (ARM programs run emulated on an x86 computer). `flash.sh` checks
+   that the phone is a miatoll and charged, asks for the word `erase`, then
+   writes CACHE, USERDATA (sparse), erases DTBO and writes U-Boot to BOOT
+   last.
+5. The first boot grows the root and sets up pacman's keyring, then shows
+   the lock screen. Log in over USB: `ssh alarm@172.16.42.1`.
+
+### Updating
+
+- **A new kernel or boot stage alone**, the system and its data kept:
+  install the new modules on the phone (`usr/lib/modules/<release>` from
+  `build/linux-sm7125-6.14.7-r2/out/modroot`, then `depmod`), and
+  `scripts/flash.sh --boot-only` (CACHE only).
+- **A new system version**, keeping the user's data:
+  `scripts/upgrade.sh save` on the old system, `scripts/flash.sh`, wait for
+  the lock screen, `scripts/upgrade.sh restore <file>`. Kept: the home,
+  Wi-Fi networks, Bluetooth pairings, messages, learned performance state,
+  SSH host keys, the time zone and the password (the same `--user` on both).
+  The file holds Wi-Fi passwords: it stays in `backups/` (git-ignored).
+
+### Going back
+
+`fastboot flash cache <the previous boot partition image>` puts back the
+previous kernel and boot stage without touching the system. If even
+fastboot will not come up, hold Volume Down + Power from off: it is the
+Xiaomi bootloader's own, never written.
+
+## Known issues and next steps
+
+- **Fast charging**: port an SMB5 charger driver (Casey Connolly's
+  `qcom_pmi8998_charger` extension for PM8150B is the starting point) and
+  add the PM6150 charger node; USB PD at 9 V also needs the USB-C port as a
+  sink (`power-role = "source"` in the device tree today). Values from
+  Xiaomi's kernel sources, tried step by step at low currents.
+- **The clock**: a service keeping the RTC's offset, as the S9 (Snapdragon)
+  port's `ztos-starq-rtc` does.
+- **ztMETRO aborts on a requested restart** (display size, style): it does
+  not remove its backend listeners before `wlr_backend_destroy`, and
+  wlroots asserts; greetd starts it again. ztOS's own, the S9's too.
+- **Calls, SMS, data**: ModemManager over QRTR.
+- **Sensors**: hexagonrpcd and libssc for the ADSP's sensor domain
+  (`vendor/ztos/udev/81-libssc-xiaomi-miatoll.rules` is postmarketOS's).
+- `zrndevtest` (the device test app) crashes: it looks for the S9's parts.
+- Settings' processor, graphics, memory and About pages show the S9's
+  hardware (Exynos 9810, Mali-G72): written into Settings, not read.
+- `/etc/os-release` still says BETA-1 / 0.2.0: BETA-1.1 left
+  `os/overlay/etc/os-release` behind.
+- Waydroid: no binderfs in the kernel config yet (`CONFIG_ANDROID_BINDERFS`
+  in `kernel/ztos.config` would add it).
+
+## How it got here
+
+The first image was ztConflo's postmarketOS path (pmbootstrap's kernel,
+initramfs and firmware under the ztOS GSI). The fixes it needed went into
+ztConflo: the fastboot-bootpart flashing (FAT32 ESP on CACHE, U-Boot on
+BOOT, DTBO erased), the Qualcomm services for the modem and Wi-Fi, ztoscsf's
+component list, and `/etc/skel` for a user the GSI already has. This folder
+then replaced postmarketOS's parts one at a time, each checked against that
+working image: the kernel built here (config identical but for the
+version), zboot instead of postmarketOS's initramfs (tried by flashing CACHE
+alone on the running system, its data kept), the firmware fetched here
+(byte for byte the same), and finally the whole system from the installer.
