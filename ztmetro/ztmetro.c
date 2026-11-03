@@ -5399,6 +5399,21 @@ static bool on_charger(void) {
 	if (dir) {
 		closedir(dir);
 	}
+#ifdef HAVE_ZTOS_IAL
+	/* no charger driver (the PMIC charges by itself, as on SM7125): ztOSIAL's
+	 * Power1 tells from the battery's current, asked at its own pace */
+	if (!charging) {
+		static uint32_t asked_ms;
+		static bool ial_online;
+		uint32_t now = now_ms();
+		if (!asked_ms || now - asked_ms >= 10000) {
+			int v = 0;
+			asked_ms = now ? now : 1;
+			ial_online = ztos_ial_get_int(NULL, "Power1", "ChargerOnline", &v) >= 0 && v;
+		}
+		charging = ial_online;
+	}
+#endif
 	return charging;
 }
 
