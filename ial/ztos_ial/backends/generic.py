@@ -179,7 +179,9 @@ class Display(Backend):
 
     def __init__(self, config, manifest):
         super().__init__(config, manifest)
-        self.node = config.get('node') or (first('/sys/class/backlight/*') or '')
+        node = config.get('node')
+        # "auto" (what ztConflo writes) means the same as no node: find it
+        self.node = node if node and node != 'auto' else (first('/sys/class/backlight/*') or '')
         self.curve = config.get('curve', 'linear')
         self.mode = config.get('mode', 'linear')
 
@@ -324,7 +326,8 @@ class Haptics(Backend):
 
     def __init__(self, config, manifest):
         super().__init__(config, manifest)
-        self.device = self._find(config.get('device'))
+        device = config.get('device')
+        self.device = self._find(device if device != 'auto' else None)
 
     @staticmethod
     def _find(name):
