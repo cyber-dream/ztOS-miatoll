@@ -4,6 +4,7 @@
     ztos install                 the guided installer (asks where, and who you are)
     ztos install --target qemu   ztOS in the QEMU emulator, to try it on this computer
     ztos install --target starlte   ztOS on a Galaxy S9
+    ztos build --target miatoll  ztOS for a Redmi Note 9 Pro / 9S (devices/xiaomi-miatoll/scripts/flash.sh writes it)
     ztos emulator                start the emulator with the ztOS installed there
     ztos build --target T        only build the system (for qemu: the disk too)
     ztos build --target gsi      the generic system image alone, for ztConflo (--gsi)
@@ -213,7 +214,7 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command")
 
     def with_settings(p):
-        p.add_argument("--target", choices=["qemu", "starlte", "gsi"])
+        p.add_argument("--target", choices=["qemu", "starlte", "miatoll", "gsi"])
         p.add_argument("--user")
         p.add_argument("--password", help="(else asked; never stored)")
         p.add_argument("--hostname")
