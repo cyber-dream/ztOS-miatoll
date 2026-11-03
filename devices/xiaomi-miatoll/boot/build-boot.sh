@@ -2,10 +2,19 @@
 # The Redmi Note 9 Pro / 9S (miatoll)'s boot partition, for CACHE: a FAT32
 # filesystem labelled pmOS_boot (the name U-Boot's boot order looks for)
 # with systemd-boot as the EFI fallback loader, the kernel (an EFI zboot
-# image), ztOS's boot stage (../initramfs/init) and one loader entry. The
-# device tree comes from U-Boot in front of it (BOOT), as with postmarketOS.
+# image), ztOS's boot stage (../initramfs/init), the device tree and one
+# loader entry.
 #
-#   devices/xiaomi-miatoll/boot/build-boot.sh [--sysroot <aarch64 root>] [--cmdline "..."] [--name N]
+#   devices/xiaomi-miatoll/boot/build-boot.sh [--variant V] [--sysroot <aarch64 root>] [--cmdline "..."] [--name N]
+#
+# The device tree is U-Boot's own for the variant (the release on BOOT carries
+# one per phone and panel: joyeuse-huaxing, joyeuse-tianma, curtana-huaxing,
+# curtana-tianma), with usb-c-sink.dtso applied: U-Boot's has the USB-C port
+# as a source only, and the PMIC then charges at 500 mA whatever the charger
+# (see that file). systemd-boot applies an overlay only to a tree its entry
+# names, so the merged tree is the entry's `devicetree`; U-Boot's EFI
+# devicetree fixup still fills in the memory. Default variant: joyeuse-huaxing,
+# or the word in build/miatoll-variant.
 #
 # --sysroot gives systemd-boot (usr/lib/systemd/boot/efi/systemd-bootaa64.efi)
 # from the ztOS root being built; default: the GSI's build tree. The boot
@@ -22,10 +31,15 @@ KOUT=$ROOT/build/linux-$KTAG/out
 NAME=ztos-miatoll-bootpart
 SYSROOT=$ROOT/build/ztos/gsi/root
 CMDLINE="loglevel=4"
+VARIANT=$(cat "$ROOT/build/miatoll-variant" 2>/dev/null || echo joyeuse-huaxing)
+UBOOT_URL=https://github.com/sm7125-mainline/u-boot/releases/download/2025-06-02/u-boot-sm7125.img
+UBOOT_SHA256=6878802d0ee3c893e2a12213bca4be05da916be5dea8a2d895a803cb7f255b49
+UBOOT=$ROOT/build/u-boot-sm7125-2025-06-02.img
 BUSYBOX_PKG=busybox-1.36.1-4-aarch64.pkg.tar.xz
 BUSYBOX_URL=http://mirror.archlinuxarm.org/aarch64/extra/$BUSYBOX_PKG
 while [ $# -gt 0 ]; do
 	case $1 in
+	--variant) VARIANT=$2; shift ;;
 	--sysroot) SYSROOT=$2; shift ;;
 	--cmdline) CMDLINE="$CMDLINE $2"; shift ;;
 	--name) NAME=$2; shift ;;
@@ -40,6 +54,45 @@ for f in "$KERNEL" "$KOUT/kernel.release" "$EFI"; do
 done
 W=$ROOT/build/miatoll-boot
 mkdir -p "$W" "$ROOT/out"
+
+# --- the device tree: U-Boot's for the variant, the USB-C port a sink too --------
+case $VARIANT in
+joyeuse-huaxing) MODEL="Xiaomi Redmi Note 9 Pro (Global, Huaxing)" ;;
+joyeuse-tianma) MODEL="Xiaomi Redmi Note 9 Pro (Global, Tianma)" ;;
+curtana-huaxing) MODEL="Xiaomi Redmi Note 9S (Huaxing)" ;;
+curtana-tianma) MODEL="Xiaomi Redmi Note 9S (Tianma)" ;;
+*) echo "boot: unknown variant $VARIANT (joyeuse-huaxing, joyeuse-tianma, curtana-huaxing, curtana-tianma)" >&2; exit 2 ;;
+esac
+if [ ! -f "$UBOOT" ] || ! echo "$UBOOT_SHA256  $UBOOT" | sha256sum -c --status; then
+	curl -L --fail -o "$UBOOT.part" "$UBOOT_URL"
+	echo "$UBOOT_SHA256  $UBOOT.part" | sha256sum -c --quiet
+	mv "$UBOOT.part" "$UBOOT"
+fi
+DTC=$KOUT/scripts/dtc/dtc
+rm -rf "$W/uboot-dtbs"
+mkdir -p "$W/uboot-dtbs"
+# every flattened tree appended to U-Boot (FDT magic, then its size)
+python3 - "$UBOOT" "$W/uboot-dtbs" <<'PY'
+import struct, sys
+d = open(sys.argv[1], 'rb').read()
+i, n = 0, 0
+while (i := d.find(b'\xd0\x0d\xfe\xed', i)) >= 0:
+    size = struct.unpack('>I', d[i + 4:i + 8])[0]
+    if 4096 < size < 2 << 20 and i + size <= len(d):
+        n += 1
+        open(f'{sys.argv[2]}/{n}.dtb', 'wb').write(d[i:i + size])
+    i += 4
+PY
+UDTB=
+for f in "$W"/uboot-dtbs/*.dtb; do
+	[ "$(fdtget "$f" / model 2>/dev/null)" = "$MODEL" ] && UDTB=$f
+done
+[ -n "$UDTB" ] || { echo "boot: U-Boot has no device tree for \"$MODEL\"" >&2; exit 1; }
+"$DTC" -q -@ -I dts -O dtb -o "$W/usb-c-sink.dtbo" "$HERE/usb-c-sink.dtso"
+fdtoverlay -i "$UDTB" -o "$W/miatoll.dtb" "$W/usb-c-sink.dtbo"
+[ "$(fdtget "$W/miatoll.dtb" /soc@0/spmi@c440000/pmic@0/typec@1500/connector power-role)" = dual ] ||
+	{ echo "boot: the USB-C overlay did not apply" >&2; exit 1; }
+echo "boot: device tree $MODEL, USB-C port dual-role"
 
 # --- busybox (Arch Linux ARM's, statically linked) -------------------------------
 BB=$ROOT/build/miatoll-busybox/usr/bin/busybox
@@ -87,8 +140,9 @@ mmd -i "$IMG" ::EFI ::EFI/BOOT ::loader ::loader/entries
 mcopy -i "$IMG" "$EFI" ::EFI/BOOT/BOOTAA64.EFI
 mcopy -i "$IMG" "$KERNEL" ::vmlinuz
 mcopy -i "$IMG" "$W/initramfs.gz" ::initramfs
+mcopy -i "$IMG" "$W/miatoll.dtb" ::miatoll.dtb
 printf 'default ztos.conf\ntimeout 0\n' > "$W/loader.conf"
-printf 'title ztOS\nlinux /vmlinuz\ninitrd /initramfs\noptions %s\n' "$CMDLINE" > "$W/ztos.conf"
+printf 'title ztOS\nlinux /vmlinuz\ninitrd /initramfs\ndevicetree /miatoll.dtb\noptions %s\n' "$CMDLINE" > "$W/ztos.conf"
 mcopy -i "$IMG" "$W/loader.conf" ::loader/loader.conf
 mcopy -i "$IMG" "$W/ztos.conf" ::loader/entries/ztos.conf
 sha256sum "$IMG" | sed "s|  .*/|  |" > "$IMG.sha256"

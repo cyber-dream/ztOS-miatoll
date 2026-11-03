@@ -25,8 +25,8 @@ nothing yet.
 | Input | Power and volume keys | Works | |
 | 3D | GPU | Works | Adreno 618 through freedreno (Mesa reports FD618), OpenGL ES 3.2 |
 | Power | Battery level | Works | PM6150 QGauge (`qcom_qg`); for a minute after a reboot it can show a wrong level |
-| Power | Charging | Partial | The PMIC charges at its default input limit (about 500 mA): Linux has no driver for the PM6150's charger. ztOSIAL's Power1 tells charging from the current into the battery (see below). 50-100 mA net with the screen on |
-| Power | Fast charging | Not started | Needs an SMB5 charger driver (and USB PD as a sink for 9 V) |
+| Power | Charging | Works | At 5 V and the 1.4 A input limit Xiaomi's bootloader programs: 0.4-0.5 A into the battery with the screen on (about 30 °C). Linux has no driver for the PM6150's charger; the PMIC charges by itself once the USB-C port may be a sink ([`boot/usb-c-sink.dtso`](boot/usb-c-sink.dtso), below). ztOSIAL's Power1 tells charging from the current into the battery |
+| Power | Fast charging | Not started | USB PD at 9 V (a 9 V sink PDO) and a charger driver for the input limit above 1.4 A |
 | Power | Clock across reboots | Partial | Not kept by the PMIC's RTC; `/usr/lib/clock-epoch` keeps it at least at the build's date, NTP sets it once online |
 | Network | Wi-Fi | Works | WCN3991 (ath10k_snoc), `wld0`, through the modem DSP |
 | Network | USB networking to a computer | Works | NCM: 172.16.42.1, the computer gets 172.16.42.2; a serial console (ttyGS0) too |
@@ -44,7 +44,8 @@ nothing yet.
 | | |
 |---|---|
 | Kernel | [sm7125-mainline](https://github.com/sm7125-mainline/linux) `sm7125-6.14.7-r2`, the tarball and config postmarketOS's `linux-postmarketos-qcom-sm7125` 6.14.7 builds (no patches there either), plus [`kernel/ztos.config`](kernel/ztos.config): [`kernel/build-kernel.sh`](kernel/build-kernel.sh). Cross-compiled with clang (`LLVM=1`), no root, about 25 minutes the first time and minutes after (ccache). The config is postmarketOS's but for `LOCALVERSION` (`6.14.7-ztos-sm7125`); its 771 modules are the same |
-| Boot chain | The Xiaomi bootloader starts U-Boot ([sm7125-mainline's 2025-06-02 release](https://github.com/sm7125-mainline/u-boot/releases)) from BOOT, with DTBO erased; U-Boot gives the device tree and starts systemd-boot (the root's own `systemd-bootaa64.efi`) from CACHE, a 272 MiB FAT32 labelled `pmOS_boot` (UFS's 4 KiB sectors need that size for FAT32), which starts the kernel (an EFI zboot image) and zboot: [`boot/build-boot.sh`](boot/build-boot.sh), no root (mtools) |
+| USB-C | U-Boot's device tree has the port as a source only (`power-role = "source"`): the Type-C driver then keeps the PMIC in source-only mode (`TYPE_C_MODE_CFG` 0x1544 = 0x04), a charger's attach is never seen, BC1.2 detection never starts (it starts on a CC attach), and the input limit stays at USB's 500 mA (`ICL_STATUS` 0x1107 = 0x0a). [`boot/usb-c-sink.dtso`](boot/usb-c-sink.dtso) makes it dual-role, trying sink first, with one 5 V 3 A sink PDO; the PMIC then detects the charger (DCP) and takes the 1.4 A already programmed (0x1107 = 0x1c). Read from the PMIC with regmap's debugfs, read-only; nothing in the charger is written |
+| Boot chain | The Xiaomi bootloader starts U-Boot ([sm7125-mainline's 2025-06-02 release](https://github.com/sm7125-mainline/u-boot/releases)) from BOOT, with DTBO erased; U-Boot gives the device tree and starts systemd-boot (the root's own `systemd-bootaa64.efi`) from CACHE, a 272 MiB FAT32 labelled `pmOS_boot` (UFS's 4 KiB sectors need that size for FAT32), which starts the kernel (an EFI zboot image) and zboot: [`boot/build-boot.sh`](boot/build-boot.sh), no root (mtools). The device tree is U-Boot's own for the phone and panel (`--variant`: joyeuse-huaxing by default, joyeuse-tianma, curtana-huaxing, curtana-tianma; or the word in `build/miatoll-variant`), taken from the U-Boot release with the USB-C overlay applied, as the entry's `devicetree` (systemd-boot applies overlays only to a tree it loads); U-Boot's EFI fixup fills in the memory |
 | Boot stage | zboot ([`initramfs/init`](initramfs/init)), the S9 (Snapdragon) port's with this phone's names, on Arch Linux ARM's static busybox: finds the root labelled `ZR_ARCH` (or `pmOS_root`, a ztConflo image's) in USERDATA, mounts it read-only and hands over; UFS, the panels and the USB gadget are built into the kernel, so it loads nothing. It carries the touchscreens' firmware, which their built-in drivers ask for before the root is mounted |
 | Firmware | [sm7125-mainline/firmware-xiaomi-miatoll](https://github.com/sm7125-mainline/firmware-xiaomi-miatoll) at the commit postmarketOS's `firmware-xiaomi-miatoll` 5 ships, the same 15 files ([`firmware/fetch.sh`](firmware/fetch.sh), checked by sha512); the GPU's microcode from Arch's `linux-firmware-qcom`; Wi-Fi's board file from Arch's `linux-firmware` |
 | Modem, DSPs | qrtr and rmtfs from Arch Linux ARM's [aur] repository ([`packages.txt`](packages.txt)); pd-mapper v1.1 and tqftpserv v1.3 built from linux-msm's sources in [`layer.sh`](layer.sh) |
@@ -129,11 +130,14 @@ Xiaomi bootloader's own, never written.
 
 ## Known issues and next steps
 
-- **Fast charging**: port an SMB5 charger driver (Casey Connolly's
-  `qcom_pmi8998_charger` extension for PM8150B is the starting point) and
-  add the PM6150 charger node; USB PD at 9 V also needs the USB-C port as a
-  sink (`power-role = "source"` in the device tree today). Values from
-  Xiaomi's kernel sources, tried step by step at low currents.
+- **Fast charging**: a 9 V sink PDO for USB PD chargers, and a charger
+  driver for an input limit above the bootloader's 1.4 A. Casey Connolly's
+  SMB5 patch for `qcom_smbx` (v1, June 2025, not merged: it also writes the
+  Type-C block the Type-C driver owns) is a start, but it programs float
+  voltage, charge current and input limit with SMB2's scales. The PM6150 is
+  SMB5: float voltage 3.6 V + 10 mV a step, currents 50 mA a step (Xiaomi's
+  `qpnp-smb5.c`, and the bootloader's FV 0x55 = 4.45 V). As posted it would
+  set about 4.82 V. Any driver writes only the input limit at first.
 - **The clock**: a service keeping the RTC's offset, as the S9 (Snapdragon)
   port's `ztos-starq-rtc` does.
 - **ztMETRO aborts on a requested restart** (display size, style): it does

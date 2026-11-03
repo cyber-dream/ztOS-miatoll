@@ -1,0 +1,16 @@
+// The USB-C port as a sink as well, applied by systemd-boot (devicetree-overlay)
+// onto the device tree U-Boot hands over. U-Boot's tree has the port as a source
+// only (power-role = "source"): the Type-C driver then keeps the PMIC in
+// source-only mode (TYPE_C_MODE_CFG EN_SRC_ONLY), a charger's attach is never
+// seen, BC1.2 detection (which starts on a CC attach) never runs, and the
+// charger stays at the 500 mA USB limit. 5 V only: nothing asks for more.
+/dts-v1/;
+/plugin/;
+
+&{/soc@0/spmi@c440000/pmic@0/typec@1500/connector} {
+	power-role = "dual";
+	try-power-role = "sink";
+	/* PDO_FIXED(5000 mV, 3000 mA, dual role, USB communications, data swap), the source PDO's flags */
+	sink-pdos = <0x2601912c>;
+	op-sink-microwatt = <15000000>;
+};
