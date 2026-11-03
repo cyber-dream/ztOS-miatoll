@@ -33,17 +33,18 @@ nothing yet.
 | Network | Bluetooth | Untested | |
 | Modem | DSP, QRTR services | Works | qrtr, rmtfs, pd-mapper, tqftpserv; the modem, ADSP and CDSP run |
 | Modem | SIM, calls, SMS, mobile data | Not started | No ModemManager in the GSI yet |
-| Audio | Speaker | Works | TAS2562, sm7125-mainline's UCM profile; PipeWire's default output. Needs [`kernel/patch-tas2562.py`](kernel/patch-tas2562.py): the mainline driver writes the amplifier's digital volume in the wrong byte order (below) |
+| Audio | Speaker | Works | TAS2562, sm7125-mainline's UCM profile; PipeWire's default output, in S16_LE ([`50-ztos-miatoll.conf`](overlay/etc/wireplumber/wireplumber.conf.d/50-ztos-miatoll.conf): in S24_LE, PipeWire's default, it plays nothing). Needs [`kernel/patch-tas2562.py`](kernel/patch-tas2562.py): the mainline driver writes the amplifier's digital volume in the wrong byte order (below) |
 | Audio | Headphones, microphones | Untested | In the profile (WCD9375): headphones, bottom and top mics |
 | Sensors | Accelerometer, light, proximity | Not started | On the ADSP's sensor domain (hexagonrpcd, libssc) |
-| Camera | Cameras | Not started | |
+| Camera | Front (16 MP), macro (5 MP) | Partial | CAMSS and both sensors' drivers come up: `Detected ov16a1q sensor` (front, CCI1 14-0010), `Detected s5k5e9 sensor` (rear macro, CCI0 13-002d, with its DW9714 focus); `/dev/media0`, `/dev/video*`. They give raw Bayer: a picture needs libcamera's software ISP, not yet installed; ztOS's Camera app speaks the S9's `/dev/zrn-cam` only |
+| Camera | Main (64 MP S5KGW1), ultra-wide (8 MP), depth (GC8034) | Not started | No drivers in the kernel |
 | Other | Fingerprint, IR, NFC | Not started | |
 
 ## How it is made
 
 | | |
 |---|---|
-| Kernel | [sm7125-mainline](https://github.com/sm7125-mainline/linux) `sm7125-6.14.7-r2`, the tarball and config postmarketOS's `linux-postmarketos-qcom-sm7125` 6.14.7 builds, plus [`kernel/ztos.config`](kernel/ztos.config) and one fix, [`kernel/patch-tas2562.py`](kernel/patch-tas2562.py): [`kernel/build-kernel.sh`](kernel/build-kernel.sh). Cross-compiled with clang (`LLVM=1`), no root, about 25 minutes the first time and minutes after (ccache). The config is postmarketOS's but for `LOCALVERSION` (`6.14.7-ztos-sm7125`); its 771 modules are the same |
+| Kernel | [sm7125-mainline](https://github.com/sm7125-mainline/linux) `sm7125-6.14.7-r2`, the tarball and config postmarketOS's `linux-postmarketos-qcom-sm7125` 6.14.7 builds, plus [`kernel/ztos.config`](kernel/ztos.config) and one fix, [`kernel/patch-tas2562.py`](kernel/patch-tas2562.py): [`kernel/build-kernel.sh`](kernel/build-kernel.sh). Cross-compiled with clang (`LLVM=1`), no root, about 25 minutes the first time and minutes after (ccache). The base config is postmarketOS's (`kernel/config-sm7125.aarch64`, kept by sm7125-mainline's maintainers: which drivers are built in for UFS, the panels, touch and USB). It was taken as is so that each postmarketOS part could be swapped out alone; what ztOS needs on top goes in `ztos.config`, which the build checks line by line (a line Kconfig quietly drops stops it): `LOCALVERSION` (`6.14.7-ztos-sm7125`), and `SECURITY_LANDLOCK` (pacman downloads in a Landlock sandbox and, without it, fetches nothing: "Landlock is not supported by the kernel"; `CONFIG_LSM` already lists landlock) |
 | USB-C | U-Boot's device tree has the port as a source only (`power-role = "source"`): the Type-C driver then keeps the PMIC in source-only mode (`TYPE_C_MODE_CFG` 0x1544 = 0x04), a charger's attach is never seen, BC1.2 detection never starts (it starts on a CC attach), and the input limit stays at USB's 500 mA (`ICL_STATUS` 0x1107 = 0x0a). [`boot/usb-c-sink.dtso`](boot/usb-c-sink.dtso) makes it dual-role, trying sink first, with one 5 V 3 A sink PDO; the PMIC then detects the charger (DCP) and takes the 1.4 A already programmed (0x1107 = 0x1c). Read from the PMIC with regmap's debugfs, read-only; nothing in the charger is written |
 | Boot chain | The Xiaomi bootloader starts U-Boot ([sm7125-mainline's 2025-06-02 release](https://github.com/sm7125-mainline/u-boot/releases)) from BOOT, with DTBO erased; U-Boot gives the device tree and starts systemd-boot (the root's own `systemd-bootaa64.efi`) from CACHE, a 272 MiB FAT32 labelled `pmOS_boot` (UFS's 4 KiB sectors need that size for FAT32), which starts the kernel (an EFI zboot image) and zboot: [`boot/build-boot.sh`](boot/build-boot.sh), no root (mtools). The device tree is U-Boot's own for the phone and panel (`--variant`: joyeuse-huaxing by default, joyeuse-tianma, curtana-huaxing, curtana-tianma; or the word in `build/miatoll-variant`), taken from the U-Boot release with the USB-C overlay applied, as the entry's `devicetree` (systemd-boot applies overlays only to a tree it loads); U-Boot's EFI fixup fills in the memory |
 | Boot stage | zboot ([`initramfs/init`](initramfs/init)), the S9 (Snapdragon) port's with this phone's names, on Arch Linux ARM's static busybox: finds the root labelled `ZR_ARCH` (or `pmOS_root`, a ztConflo image's) in USERDATA, mounts it read-only and hands over; UFS, the panels and the USB gadget are built into the kernel, so it loads nothing. It carries the touchscreens' firmware, which their built-in drivers ask for before the root is mounted |
@@ -155,7 +156,18 @@ Xiaomi bootloader's own, never written.
 - `/etc/os-release` still says BETA-1 / 0.2.0: BETA-1.1 left
   `os/overlay/etc/os-release` behind.
 - Waydroid: no binderfs in the kernel config yet (`CONFIG_ANDROID_BINDERFS`
-  in `kernel/ztos.config` would add it).
+  in `kernel/ztos.config` would add it). The base config is postmarketOS's,
+  made for postmarketOS's needs: checking `ztos.config` against the GSI's
+  kernel contract (ztConflo reports `waydroid` and `gsi-soft` as soft gaps)
+  would find the rest at once.
+- Sound out of the headphones' sink with nothing plugged in: ztMETRO's
+  audio output switch (volume panel) cycles through every sink, the
+  unavailable headphones too, and WirePlumber keeps the choice as the
+  default and per application (`~/.local/state/wireplumber/default-nodes`,
+  `stream-properties`; Superscan was found pinned to Headphones). The
+  switch could skip outputs whose port is "not available".
+- Camera: libcamera with the software ISP for the front and macro sensors,
+  then ztOS's Camera app on libcamera.
 
 ## How it got here
 
