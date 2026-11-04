@@ -1,0 +1,7 @@
+s5kgw1-tables.h
+*.o
+*.ko
+*.mod*
+.*.cmd
+Module.symvers
+modules.order

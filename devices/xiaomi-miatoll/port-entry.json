@@ -5,7 +5,7 @@
  "codename": "miatoll",
  "maintainer": "",
  "contact": "",
- "summary": "ztOS on the Redmi Note 9 Pro (joyeuse) and Redmi Note 9S (curtana), Snapdragon 720G, without postmarketOS. Mainline Linux 6.14.7 from sm7125-mainline, with a fix for the speaker amplifier's volume and Landlock for pacman. Xiaomi's bootloader starts U-Boot from BOOT, then systemd-boot on CACHE, the kernel and ztOS's boot stage; the system lives in USERDATA. Display, touch, the Adreno GPU, Wi-Fi, the speaker and charging (at 1.4 A) work; the modem DSP runs, but calls, SMS, data and the sensors are not set up yet. Built on Linux in a user namespace, no root needed.",
+ "summary": "ztOS on the Redmi Note 9 Pro (joyeuse) and Redmi Note 9S (curtana), Snapdragon 720G, without postmarketOS. Mainline Linux 6.14.7 from sm7125-mainline, with a fix for the speaker amplifier's volume and Landlock for pacman. Xiaomi's bootloader starts U-Boot from BOOT, then systemd-boot on CACHE, the kernel and ztOS's boot stage; the system lives in USERDATA. Display, touch, the Adreno GPU, Wi-Fi, the speaker, the front and macro cameras and charging (at 1.4 A) work; the modem DSP runs, but calls, SMS, data and the sensors are not set up yet. Built on Linux in a user namespace, no root needed.",
  "specs": [
   [
    "SoC",
@@ -198,9 +198,21 @@
   },
   {
    "category": "Camera",
-   "feature": "Cameras",
+   "feature": "Front and macro cameras",
+   "status": "working",
+   "notes": "In ztOS's Camera app through CAMSS: raw Bayer developed on the GPU, about 28 fps; colour not calibrated"
+  },
+  {
+   "category": "Camera",
+   "feature": "Main 64 MP camera",
+   "status": "partial",
+   "notes": "The S5KGW1 driver finds and starts the sensor, but no frame reaches CAMSS yet"
+  },
+  {
+   "category": "Camera",
+   "feature": "Ultra-wide and depth cameras",
    "status": "broken",
-   "notes": "No picture yet. The front (OV16A1Q) and macro (S5K5E9) sensors are detected and give raw frames, which need libcamera; the main 64 MP, ultra-wide and depth cameras have no drivers"
+   "notes": "No drivers"
   },
   {
    "category": "Location",

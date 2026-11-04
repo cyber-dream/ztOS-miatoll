@@ -36,8 +36,9 @@ nothing yet.
 | Audio | Speaker | Works | TAS2562, sm7125-mainline's UCM profile; PipeWire's default output, in S16_LE ([`50-ztos-miatoll.conf`](overlay/etc/wireplumber/wireplumber.conf.d/50-ztos-miatoll.conf): in S24_LE, PipeWire's default, it plays nothing). Needs [`kernel/patch-tas2562.py`](kernel/patch-tas2562.py): the mainline driver writes the amplifier's digital volume in the wrong byte order (below) |
 | Audio | Headphones, microphones | Untested | In the profile (WCD9375): headphones, bottom and top mics |
 | Sensors | Accelerometer, light, proximity | Not started | On the ADSP's sensor domain (hexagonrpcd, libssc) |
-| Camera | Front (16 MP), macro (5 MP) | Partial | CAMSS and both sensors' drivers come up: `Detected ov16a1q sensor` (front, CCI1 14-0010), `Detected s5k5e9 sensor` (rear macro, CCI0 13-002d, with its DW9714 focus); `/dev/media0`, `/dev/video*`. They give raw Bayer: a picture needs libcamera's software ISP, not yet installed; ztOS's Camera app speaks the S9's `/dev/zrn-cam` only |
-| Camera | Main (64 MP S5KGW1), ultra-wide (8 MP), depth (GC8034) | Not started | No drivers in the kernel |
+| Camera | Front (16 MP), macro (5 MP) | Working | In ztOS's Camera app, through CAMSS (`ztmetro/camera/camss-source.h`): raw 10-bit Bayer to memory, unpacked and developed on the GPU as the S9's are; front 2304x1728 and macro 2592x1944 at about 28 fps, the macro's DW9714 focus walked in steps (mainline's jumps it, loudly). Colour is uncalibrated |
+| Camera | Main (64 MP S5KGW1) | Partial | [`kernel/s5kgw1/`](kernel/s5kgw1/README.md): the driver finds the sensor (0x3d on CCI0, revision 0xA2) and starts it, but no frame reaches CAMSS yet: the CSIPHY sees no signal |
+| Camera | Ultra-wide (8 MP), depth | Not started | No drivers |
 | Other | Fingerprint, IR, NFC | Not started | |
 
 ## How it is made
@@ -170,8 +171,8 @@ Xiaomi bootloader's own, never written.
   default and per application (`~/.local/state/wireplumber/default-nodes`,
   `stream-properties`; Superscan was found pinned to Headphones). The
   switch could skip outputs whose port is "not available".
-- Camera: libcamera with the software ISP for the front and macro sensors,
-  then ztOS's Camera app on libcamera.
+- Camera: the main camera's frames (see `kernel/s5kgw1/README.md`), colour
+  calibration for the front and macro.
 
 ## How it got here
 

@@ -243,22 +243,37 @@ static bool camss_open(bool front, struct zrn_cam_frame *info) {
 	for (int i = 0; i < n; i++) {
 		camss_links(&e[i], l, 0, true);		/* as media-ctl -r */
 	}
-	/* the sensor; one streams at a time, always through the first receiver */
+	/*
+	 * The sensor facing that way: the one named by $CAMSS_SENSOR (a prefix,
+	 * "s5k5e9"), else the largest, the main camera. Opening a sensor's node
+	 * and asking its controls and format does not power it. One streams at a
+	 * time, always through the first receiver.
+	 */
 	const struct media_entity_desc *sensor = NULL;
+	const char *want = getenv("CAMSS_SENSOR");
+	uint64_t best = 0;
 	int k = 0;
-	for (int i = 0; i < n && !sensor; i++) {
+	for (int i = 0; i < n; i++) {
 		if (e[i].type != MEDIA_ENT_F_CAM_SENSOR) {
 			continue;
 		}
 		int fd = camss_node(&e[i], O_RDWR);
 		bool f = camss_ctrl_get(fd, V4L2_CID_CAMERA_ORIENTATION, -1) == V4L2_CAMERA_ORIENTATION_FRONT;
-		if (f == front) {
+		struct v4l2_subdev_format g = { .which = V4L2_SUBDEV_FORMAT_ACTIVE, .pad = 0 };
+		uint64_t area = fd >= 0 && ioctl(fd, VIDIOC_SUBDEV_G_FMT, &g) == 0 ?
+			(uint64_t)g.format.width * g.format.height : 1;
+		if (want && strncmp(e[i].name, want, strlen(want)) != 0) {
+			area = 0;
+		}
+		if (f == front && area > best) {
+			if (camss.sensor >= 0) {
+				close(camss.sensor);
+			}
 			sensor = &e[i];
 			camss.sensor = fd;
-		} else {
-			if (fd >= 0) {
-				close(fd);
-			}
+			best = area;
+		} else if (fd >= 0) {
+			close(fd);
 		}
 	}
 	if (!sensor || camss.sensor < 0) {

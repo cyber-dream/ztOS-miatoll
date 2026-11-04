@@ -22,7 +22,7 @@ SUMMARY = (
     "postmarketOS. Mainline Linux 6.14.7 from sm7125-mainline, with a fix for the speaker amplifier's "
     "volume and Landlock for pacman. Xiaomi's bootloader starts U-Boot from BOOT, then systemd-boot on "
     "CACHE, the kernel and ztOS's boot stage; the system lives in USERDATA. Display, touch, the Adreno "
-    "GPU, Wi-Fi, the speaker and charging (at 1.4 A) work; the modem DSP runs, but calls, SMS, data and "
+    "GPU, Wi-Fi, the speaker, the front and macro cameras and charging (at 1.4 A) work; the modem DSP runs, but calls, SMS, data and "
     "the sensors are not set up yet. Built on Linux in a user namespace, no root needed."
 )
 
@@ -70,9 +70,11 @@ FEATURES = [
     ('Sensors', 'Ambient light', B, "On the ADSP's sensor domain: not set up yet"),
     ('Sensors', 'Accelerometer, gyroscope', B, "On the ADSP's sensor domain: not set up yet"),
     ('Sensors', 'Proximity', B, "On the ADSP's sensor domain: not set up yet"),
-    ('Camera', 'Cameras', B,
-     'No picture yet. The front (OV16A1Q) and macro (S5K5E9) sensors are detected and give raw frames, '
-     'which need libcamera; the main 64 MP, ultra-wide and depth cameras have no drivers'),
+    ('Camera', 'Front and macro cameras', W,
+     "In ztOS's Camera app through CAMSS: raw Bayer developed on the GPU, about 28 fps; colour not calibrated"),
+    ('Camera', 'Main 64 MP camera', P,
+     'The S5KGW1 driver finds and starts the sensor, but no frame reaches CAMSS yet'),
+    ('Camera', 'Ultra-wide and depth cameras', B, 'No drivers'),
     ('Location', 'GPS', U, ''),
     ('Software', 'ztMETRO', W, ''),
     ('Software', 'Android apps (Waydroid)', B, 'No binderfs in the kernel yet'),
