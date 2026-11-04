@@ -11,6 +11,10 @@
  * 1023 (libexynoscamera3.so), sensor orientation rear 90, front 270 (the same), rear
  * colour from its forward matrices; front colour from a matrix in setfile_3h1.bin.
  * Included by ztcamera.c, inside its GL frame.
+ *
+ * Without /dev/zrn-cam, a Qualcomm CAMSS's cameras (camss-source.h) come the same
+ * way: the frames unpacked to 16-bit Bayer, and the sensor's own facts in place of
+ * the S9's.
  */
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -36,6 +40,9 @@ struct zrn_cam_frame {
 };
 
 enum raw_cam { RAW_REAR, RAW_FRONT, RAW_IR, RAW_N };
+
+#include "camss-source.h"
+
 enum af_state { AF_IDLE, AF_WAIT_AE, AF_SWEEP, AF_REFINE, AF_HOLD };
 
 static struct {
@@ -67,6 +74,11 @@ static struct {
 	enum af_state af;
 	double af_low_since, af_asked;
 	bool ae_settled;
+	/* the camera: CAMSS's rather than zrn-cam's, red's place in the Bayer cell, how the
+	 * sensor is turned, mirrored as the front is, a focus motor */
+	bool camss;
+	int rx, ry, rotation;
+	bool mirror, has_af;
 } raw = { .fd = -1, .dmabuf = -1, .gain = { 1, 1, 1 }, .coarse = 8000, .again = 64 };
 
 static const char *const raw_stop_why[] = { "running", "stopped", "idle", "time limit",
@@ -79,6 +91,18 @@ static const float rear_fm_d[9] = { 1.546f, -0.498f, -0.046f, -0.244f, 1.424f, -
 /* setfile_3h1.bin, at 0x18137 and repeated, over 256: which illuminant is not labelled */
 static const float front_ccm[9] = { 330 / 256.f, -80 / 256.f, 6 / 256.f, -72 / 256.f, 346 / 256.f, -18 / 256.f,
 	-12 / 256.f, -119 / 256.f, 387 / 256.f };
+/* CAMSS's sensors have no calibration here: a mild matrix, rows summing to 1 */
+static const float plain_ccm[9] = { 1.5f, -0.35f, -0.15f, -0.25f, 1.45f, -0.2f, -0.05f, -0.45f, 1.5f };
+
+/* a camera of either kind, zrn-cam's or CAMSS's */
+static bool raw_present(void) {
+	return access(RAW_DEV, F_OK) == 0 || camss_present();
+}
+
+/* the S9's IR camera, only zrn-cam's */
+static bool raw_has_ir(void) {
+	return access(RAW_DEV, F_OK) == 0;
+}
 
 static double raw_now(void) {
 	struct timespec t;
@@ -101,6 +125,11 @@ static void raw_images_free(void) {
 
 static void raw_close(void) {
 	raw_images_free();
+	if (raw.camss) {
+		camss_close();
+		raw.camss = false;
+		raw.map = NULL;
+	}
 	if (raw.map) {
 		munmap(raw.map, RAW_POOL);
 		raw.map = NULL;
@@ -122,13 +151,21 @@ static bool raw_say(const char *cmd) {
 static void raw_set_exposure(int c, int g) {
 	char cmd[40];
 	snprintf(cmd, sizeof(cmd), "exp %d %d", c, g);
-	raw_say(cmd);
+	if (raw.camss) {
+		camss_exposure(c, g);
+	} else {
+		raw_say(cmd);
+	}
 }
 
 static void raw_set_focus(int pos) {
 	char cmd[24];
 	snprintf(cmd, sizeof(cmd), "af %d", pos);
-	raw_say(cmd);
+	if (raw.camss) {
+		camss_focus(pos);
+	} else {
+		raw_say(cmd);
+	}
 }
 
 /* Focus waits for exposure: a dark frame's noise scores as sharp at any lens position. */
@@ -158,6 +195,32 @@ static bool raw_open(enum raw_cam cam) {
 	if (cam == RAW_IR) {
 		return false;
 	}
+	raw.wb_set = false;
+	raw.gain[0] = raw.gain[1] = raw.gain[2] = 1;
+	if (!raw_has_ir()) {
+		if (!camss_open(cam == RAW_FRONT, &raw.info)) {
+			return false;
+		}
+		raw.camss = true;
+		raw.map = camss.pool;
+		raw.rx = camss.rx;
+		raw.ry = camss.ry;
+		/* the kernel's rotation counts the other way round from stock Samsung's */
+		raw.rotation = (camss.rotation + 180) % 360;
+		raw.mirror = camss.front;
+		raw.has_af = camss.focus_max > 0;
+		raw.coarse_max = camss.exp_max;
+		raw.coarse = camss.exp_max / 2;
+		raw.again = 64;
+		memcpy(raw.ccm, plain_ccm, sizeof(raw.ccm));
+		raw_set_exposure(raw.coarse, raw.again);
+		if (raw.has_af) {
+			raw_focus_start();
+		} else {
+			raw.af = AF_IDLE;
+		}
+		return true;
+	}
 	raw.fd = open(RAW_DEV, O_RDWR | O_CLOEXEC);
 	if (raw.fd < 0) {
 		return false;
@@ -176,6 +239,12 @@ static bool raw_open(enum raw_cam cam) {
 		raw_close();
 		return false;
 	}
+	/* rear GB/RG: red at x 0, y 1. Front GR/BG: red at x 1, y 0. */
+	raw.rx = raw.info.bayer ? 1 : 0;
+	raw.ry = raw.info.bayer ? 0 : 1;
+	raw.rotation = cam == RAW_FRONT ? 270 : 90;
+	raw.mirror = cam == RAW_FRONT;
+	raw.has_af = true;
 	raw.dmabuf = ioctl(raw.fd, RAW_DMABUF);
 	if (raw.dmabuf < 0) {
 		fprintf(stderr, "ztcamera: no DMA-BUF (%s), the frames will be copied\n", strerror(errno));
@@ -184,8 +253,6 @@ static bool raw_open(enum raw_cam cam) {
 	raw.coarse_max = cam == RAW_FRONT ? 1250 : 25000;
 	raw.coarse = cam == RAW_FRONT ? 1000 : 8000;
 	raw.again = 64;
-	raw.wb_set = false;
-	raw.gain[0] = raw.gain[1] = raw.gain[2] = 1;
 	memcpy(raw.ccm, cam == RAW_FRONT ? front_ccm : rear_fm_d, sizeof(raw.ccm));
 	raw_set_exposure(raw.coarse, raw.again);
 	raw_focus_start();
@@ -228,8 +295,10 @@ static void raw_stats(const uint8_t *base) {
 		const uint16_t *b = (const uint16_t *)(base + (size_t)(y + 1) * st);
 		bool ymid = y > h / 4 && y < h * 3 / 4;
 		for (int x = w / 64 & ~1; x < w - 1; x += w / 32 & ~1) {
-			int g1 = a[x], one = a[x + 1], other = b[x], g2 = b[x + 1];
-			int r = raw.info.bayer ? one : other, bl = raw.info.bayer ? other : one;
+			/* the 2x2 cell by red's place: blue opposite, green the other two */
+			int cell[2][2] = { { a[x], a[x + 1] }, { b[x], b[x + 1] } };
+			int r = cell[raw.ry][raw.rx], bl = cell[1 - raw.ry][1 - raw.rx];
+			int g1 = cell[raw.ry][1 - raw.rx], g2 = cell[1 - raw.ry][raw.rx];
 			double wt = ymid && x > w / 4 && x < w * 3 / 4 ? 2 : 1;
 			seen += wt;
 			if (g1 >= 990 || g2 >= 990 || r >= 990 || bl >= 990) {
@@ -258,7 +327,7 @@ static void raw_stats(const uint8_t *base) {
 		raw.gain[2] += (kb - raw.gain[2]) * m;
 		raw.gain[1] = 1;
 		raw.wb_set = true;
-		if (raw.cam == RAW_REAR) {
+		if (raw.cam == RAW_REAR && !raw.camss) {
 			/* warm light has the larger red gain: A's matrix there, D65's in daylight */
 			double t = fmin(1, fmax(0, (raw.gain[0] - 1.5) / 0.8));
 			for (int i = 0; i < 9; i++) {
@@ -272,9 +341,10 @@ static void raw_stats(const uint8_t *base) {
 static double raw_sharpness(const uint8_t *base) {
 	int w = raw.info.w, h = raw.info.h, st = raw.info.stride;
 	double d = 0, s = 1;
+	int gx = raw.ry ? raw.rx : 1 - raw.rx;	/* green's place on an even row */
 	for (int y = (h * 3 / 8) & ~1; y < h * 5 / 8; y += 8) {
 		const uint16_t *a = (const uint16_t *)(base + (size_t)y * st);
-		for (int x = (w * 3 / 8) & ~1; x < w * 5 / 8; x += 8) {
+		for (int x = ((w * 3 / 8) & ~1) + gx; x + 10 < w * 5 / 8; x += 8) {
 			/* pairs of green pixels against the next pair: less noise than one against one */
 			int v = (int)a[x] + a[x + 2] - 2 * RAW_BLACK, u = (int)a[x + 4] + a[x + 6] - 2 * RAW_BLACK;
 			int m = (int)a[x + 8] + a[x + 10] - 2 * RAW_BLACK;
@@ -345,7 +415,11 @@ static void raw_focus(const uint8_t *base) {
 
 /* Newest frame's statistics; a stopped camera returns its reason. */
 static const char *raw_poll(void) {
-	if (raw.fd < 0 || read(raw.fd, &raw.info, sizeof(raw.info)) != sizeof(raw.info)) {
+	if (raw.camss) {
+		if (camss_poll(&raw.info) < 0) {
+			return "gone";
+		}
+	} else if (raw.fd < 0 || read(raw.fd, &raw.info, sizeof(raw.info)) != sizeof(raw.info)) {
 		return raw.fd < 0 ? NULL : "gone";
 	}
 	if (raw.info.stopped) {
@@ -589,12 +663,7 @@ static void raw_develop(void) {
 	glUseProgram(raw.prog);
 	glUniform2f(raw.u_size, (float)w, (float)h);
 	glUniform4fv(raw.u_unpack, 1, raw.unpack);
-	/* rear GB/RG: red at x 0, y 1. Front GR/BG: red at x 1, y 0. */
-	if (raw.info.bayer) {
-		glUniform2f(raw.u_first, 1, 0);
-	} else {
-		glUniform2f(raw.u_first, 0, 1);
-	}
+	glUniform2f(raw.u_first, (float)raw.rx, (float)raw.ry);
 	/* no gain below 1, or a clipped white would come out tinted */
 	float low = fmin(fmin(raw.gain[0], raw.gain[1]), raw.gain[2]);
 	glUniform3f(raw.u_gain, raw.gain[0] / low, raw.gain[1] / low, raw.gain[2] / low);
@@ -623,7 +692,8 @@ static void raw_develop(void) {
  * Over the whole window, cropped to fill. The sensors lie on their sides, by
  * stock's orientation: rear 90, front 270, so the front's picture is the rear's
  * turned half round. The front is then mirrored like a mirror, as stock previews it;
- * that leaves its v the same as the rear's and its u reversed.
+ * that leaves its v the same as the rear's and its u reversed. CAMSS's sensors say
+ * their own turn; there too only the front is mirrored.
  * The core's own program and buffers come back afterwards; every core draw sets
  * its texture and vertices again.
  */
@@ -642,14 +712,15 @@ static void raw_draw(void) {
 	glBindTexture(GL_TEXTURE_2D, raw.out_tex);
 	double span = fmin(1, ((double)zmc.width / zmc.height) * ((double)raw.info.w / raw.info.h));
 	float v0 = 0.5f - span / 2, v1 = 0.5f + span / 2;
-	bool front = raw.cam == RAW_FRONT;
-	float top = front ? 1 : 0, bottom = front ? 0 : 1;
+	bool half = raw.rotation == 270, left_v1 = half == raw.mirror;
+	float top = half ? 1 : 0, bottom = half ? 0 : 1;
+	float vl = left_v1 ? v1 : v0, vr = left_v1 ? v0 : v1;
 	/* position x,y, then the frame's u,v */
 	const float q[16] = {
-		-1,  1, top, v1,
-		 1,  1, top, v0,
-		-1, -1, bottom, v1,
-		 1, -1, bottom, v0,
+		-1,  1, top, vl,
+		 1,  1, top, vr,
+		-1, -1, bottom, vl,
+		 1, -1, bottom, vr,
 	};
 	glUniform1f(raw.d_pitch, zmc.style == ZMC_STYLE_DOTMATRIX ? (float)(zmg_dot_pitch * zmc.scale) : 0.0f);
 	glUniform2f(raw.d_step, 1.0f / raw.info.w, 1.0f / raw.info.h);
@@ -663,15 +734,15 @@ static void raw_draw(void) {
 /*
  * A photo: the sensor at full size for a moment, developed by the same shaders,
  * upright, the front mirrored as in the viewfinder. Falls back to the preview's size if the full mode gives no frame. Returns a new
- * surface or NULL.
+ * surface or NULL. A CAMSS sensor's viewfinder is already its full size: its newest frame.
  */
 static cairo_surface_t *raw_capture(void) {
-	if (!raw_gl() || raw.fd < 0) {
+	if (!raw_gl() || (raw.fd < 0 && !raw.camss) || (raw.camss && !raw.info.seq)) {
 		return NULL;
 	}
 	bool front = raw.cam == RAW_FRONT;
 	int c = raw.coarse, g = raw.again, focus = raw.af_best;
-	bool full = raw_say(front ? "frontfull" : "rearfull");
+	bool full = !raw.camss && raw_say(front ? "frontfull" : "rearfull");
 	raw_images_free();
 	if (full) {
 		/* the same time in lines: preview's line length over the full mode's */
@@ -695,10 +766,10 @@ static cairo_surface_t *raw_capture(void) {
 			}
 		}
 	}
-	if (!full) {
+	if (!full && !raw.camss) {
 		fprintf(stderr, "ztcamera: no full-size frame (stopped %u, errors %u)\n", raw.info.stopped, raw.info.errors);
 	}
-	if (!full) {	/* back to preview, then its next frame */
+	if (!full && !raw.camss) {	/* back to preview, then its next frame */
 		raw_say(front ? "front" : "rear");
 		raw_images_free();
 		struct timespec nap = { 0, 300000000 };
@@ -725,11 +796,12 @@ static cairo_surface_t *raw_capture(void) {
 		int st = cairo_image_surface_get_stride(sf);
 		cairo_surface_flush(sf);
 		/* the same mapping as raw_draw: screen row y is the frame's u, screen column x its v */
+		bool half = raw.rotation == 270, left_v1 = half == raw.mirror;
 		for (int y = 0; y < w; y++) {
 			uint32_t *row = (uint32_t *)(d + (size_t)y * st);
-			int u = front ? w - 1 - y : y;
+			int u = half ? w - 1 - y : y;
 			for (int x = 0; x < h; x++) {
-				const uint8_t *s = px + ((size_t)(h - 1 - x) * w + u) * 4;
+				const uint8_t *s = px + ((size_t)(left_v1 ? h - 1 - x : x) * w + u) * 4;
 				row[x] = 0xff000000u | (uint32_t)s[0] << 16 | (uint32_t)s[1] << 8 | s[2];
 			}
 		}

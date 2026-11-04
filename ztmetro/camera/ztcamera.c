@@ -386,7 +386,7 @@ static void source_start(enum source_kind want) {
 			break;
 		}
 		note("%s", raw.cam == RAW_IR ? "IR camera: the sensor does not answer yet"
-			: "no camera driver (" RAW_DEV ")");
+			: "no camera (" RAW_DEV " or CAMSS)");
 		/* fall through */
 	case SRC_V4L2:
 		if (device_path && v4l2_open(device_path)) {
@@ -1497,7 +1497,7 @@ static void source_cycle(void) {
 		note("stop recording before changing source");
 		return;
 	}
-	if (src.kind == SRC_SCENE && !replay_path && !device_path && access(RAW_DEV, F_OK) == 0) {
+	if (src.kind == SRC_SCENE && !replay_path && !device_path && raw_present()) {
 		raw.cam = RAW_REAR;
 		source_start(SRC_RAW);
 	} else if (src.kind == SRC_SCENE) {
@@ -1522,8 +1522,8 @@ static void source_cycle(void) {
 
 /* Rear only; the driver limits how many moves one load may make. */
 static void aperture_toggle(void) {
-	if (raw.cam != RAW_REAR) {
-		note("only the rear camera has an aperture");
+	if (raw.cam != RAW_REAR || raw.camss) {
+		note(raw.camss ? "this camera's aperture is fixed" : "only the rear camera has an aperture");
 		return;
 	}
 	bool to24 = !raw.f24;
@@ -1538,8 +1538,8 @@ static void aperture_toggle(void) {
 static void facing_toggle(void) {
 	static bool ir_parked;	/* IR has no picture yet: the test scene shows, the next tap is rear */
 	if (src.kind == SRC_RAW || ir_parked) {
-		/* rear, front, IR, each from the one before */
-		raw.cam = ir_parked ? RAW_REAR : raw.cam == RAW_REAR ? RAW_FRONT : RAW_IR;
+		/* rear, front, IR (the S9's only), each from the one before */
+		raw.cam = ir_parked ? RAW_REAR : raw.cam == RAW_REAR ? RAW_FRONT : raw_has_ir() ? RAW_IR : RAW_REAR;
 		ui.front = raw.cam == RAW_FRONT;
 		ir_parked = raw.cam == RAW_IR;
 		source_start(SRC_RAW);
@@ -1906,7 +1906,7 @@ static void arrived(int page) {
 	roll_scan();
 	thumb_load();
 	source_start(device_path ? SRC_V4L2 : replay_path ? SRC_REPLAY :
-		access(RAW_DEV, F_OK) == 0 ? SRC_RAW : SRC_SCENE);
+		raw_present() ? SRC_RAW : SRC_SCENE);
 	if (src.kind == SRC_SCENE) {
 		snprintf(src.name, sizeof(src.name), "test scene 640x480");
 	}
@@ -2015,7 +2015,8 @@ int main(int argc, char **argv) {
 		if (dial_arg < -1 || dial_arg >= N_CONTROLS) return 2;
 		return render_png(out_png, dial_arg);
 	}
-	if (!device_path && !replay_path && access("/dev/video0", R_OK | W_OK) == 0) {
+	/* not with raw cameras: CAMSS's /dev/video0 is a receiver's output, no webcam */
+	if (!device_path && !replay_path && !raw_present() && access("/dev/video0", R_OK | W_OK) == 0) {
 		device_path = "/dev/video0";
 	}
 	int status = zmc_run(&camera, 0);
